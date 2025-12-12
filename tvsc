@@ -119,7 +119,7 @@ class TvsClient:
         if protocol_id != PROTOCOL_ID:
             raise ProgramError(f'Invalid protocol ID: {protocol_id}')
 
-        if version != PROTOCOL_VERSION:
+        if version > PROTOCOL_VERSION:
             raise ProgramError(f'Invalid protocol version: {version}')
 
         if session_id != self.session_id:

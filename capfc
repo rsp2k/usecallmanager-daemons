@@ -280,7 +280,7 @@ class CapfClient:
 
         version = elements.get(ELEMENT_VERSION, None)
 
-        if version != PROTOCOL_VERSION:
+        if version > PROTOCOL_VERSION:
             raise ProgramError(f'Invalid protocol version: {version}')
 
         auth_elements = {ELEMENT_PASSWORD: password or ''}

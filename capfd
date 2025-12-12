@@ -109,11 +109,17 @@ class ProgramError(Exception):
 
 
 class CapfServer:
-    def __init__(self, port, timeout, capf_certificate_file):
+    def __init__(self, port, timeout, capf_certificate_file, allow_tlsv1):
         self.server_socket = None
 
         ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         ssl_context.verify_mode = ssl.CERT_NONE
+
+        if allow_tlsv1:
+            ssl_context.minimum_version = ssl.TLSVersion.TLSv1
+            ssl_context.set_ciphers('DEFAULT:@SECLEVEL=0')
+
+            logging.warning("TLSv1.0 connections are vulnerable to CVE-2014-3566")
 
         try:
             ssl_context.load_cert_chain(capf_certificate_file)
@@ -219,7 +225,7 @@ class CapfConnection:
 
             version = elements.get(ELEMENT_VERSION, None)
 
-            if version != PROTOCOL_VERSION:
+            if version > PROTOCOL_VERSION:
                 raise ProgramError(f'Invalid protocol version: {version}')
 
             device_name = elements.get(ELEMENT_DEVICE_NAME, None)
@@ -829,8 +835,8 @@ class CapfConnection:
 
 def main():
     try:
-        short_options = 'p:t:A:i:d:v:L:H'
-        long_options = ['port=', 'timeout=', 'capf=', 'issuer=', 'days=', 'verify=', 'limit=', 'help']
+        short_options = 'p:t:A:i:d:v:L:XH'
+        long_options = ['port=', 'timeout=', 'capf=', 'issuer=', 'days=', 'verify=', 'limit=', 'tlsv1', 'help']
 
         try:
             options, arguments = getopt.gnu_getopt(sys.argv[1:], short_options, long_options)
@@ -847,6 +853,7 @@ def main():
         verify_certificate_files = []
         certificates_dir = None
         client_limit = 0
+        allow_tlsv1 = False
         help = False
 
         for option, argument in options:
@@ -908,6 +915,9 @@ def main():
                 except ValueError:
                     raise ProgramError(f'Invalid limit: {client_limit}')
 
+            elif option in ('-X', '--tlsv1'):
+                allow_tlsv1 = True
+
             elif option in ('-H', '--help'):
                 help = True
 
@@ -922,6 +932,7 @@ def main():
                   '  -t, --timeout TIMEOUT            connection timeout in seconds (default 10)\n'
                   '  -d, --days DAYS                  number of days the certificate will be valid (default 365)\n'
                   '  -L, --limit LIMIT                concurrent client limit (default 0, no limit)\n'
+                  '  -X, --tlsv1                      allow TLSv1.0 connections (warning, vulnerable to CVE-2014-3566)\n'
                   '  -H, --help                       print this help and exit\n'
                   '\n'
                   'If no ISSUER-CERT-FILE is supplied CAPF-CERT-FILE will be used.\n'
@@ -952,7 +963,7 @@ def main():
         CapfConnection.validity_days = validity_days
         CapfConnection.client_limit = client_limit
 
-        capf_server = CapfServer(port, timeout, capf_certificate_file)
+        capf_server = CapfServer(port, timeout, capf_certificate_file, allow_tlsv1)
         capf_server.run()
 
     except ProgramError as error:

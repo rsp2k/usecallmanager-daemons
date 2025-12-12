@@ -56,11 +56,17 @@ class ProgramError(Exception):
 
 
 class TvsServer:
-    def __init__(self, port, timeout, tvs_certificate_file):
+    def __init__(self, port, timeout, tvs_certificate_file, allow_tlsv1):
         self.server_socket = None
 
         ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         ssl_context.verify_mode = ssl.CERT_NONE
+
+        if allow_tlsv1:
+            ssl_context.minimum_version = ssl.TLSVersion.TLSv1
+            ssl_context.set_ciphers('DEFAULT:@SECLEVEL=0')
+
+            logging.warning("TLSv1.0 connections are vulnerable to CVE-2014-3566")
 
         try:
             ssl_context.load_cert_chain(tvs_certificate_file)
@@ -198,7 +204,7 @@ class TvsConnection:
         if protocol_id != PROTOCOL_ID:
             raise ProgramError(f'Invalid protocol ID: {protocol_id}')
 
-        if version != PROTOCOL_VERSION:
+        if version > PROTOCOL_VERSION:
             raise ProgramError(f'Invalid protocol version: {version}')
 
         if self.session_id is None:
@@ -325,8 +331,8 @@ class TvsConnection:
 
 def main():
     try:
-        short_options = 'p:t:T:L:H'
-        long_options = ['port=', 'timeout=', 'tvs=', 'limit=', 'help']
+        short_options = 'p:t:T:L:XH'
+        long_options = ['port=', 'timeout=', 'tvs=', 'limit=', 'tlsv1', 'help']
 
         try:
             options, arguments = getopt.gnu_getopt(sys.argv[1:], short_options, long_options)
@@ -338,6 +344,7 @@ def main():
         timeout = 10
         tvs_certificate_file = None
         client_limit = 0
+        allow_tlsv1 = False
         help = False
 
         for option, argument in options:
@@ -380,6 +387,9 @@ def main():
                 except ValueError:
                     raise ProgramError(f'Invalid limit: {client_limit}')
 
+            elif option in ('-X', '--tlsv1'):
+                allow_tlsv1 = True
+
             elif option in ('-H', '--help'):
                 help = True
 
@@ -391,6 +401,7 @@ def main():
                   '  -p, --port PORT            port TVS server is listening on (default 2445)\n'
                   '  -t, --timeout TIMEOUT      connection timeout in seconds (default 10)\n'
                   '  -L, --limit LIMIT          concurrent client connection limit (default 0, no limit)\n'
+                  '  -X, --tlsv1                allow TLSv1.0 connections (warning, vulnerable to CVE-2014-3566)\n'
                   '  -H, --help                 print this help and exit\n'
                   '\n'
                   'DATABASE-FILE can be created and managed using the tvsctl program.\n')
@@ -408,7 +419,7 @@ def main():
         TvsConnection.database_file = database_file
         TvsConnection.client_limit = client_limit
 
-        tvs_server = TvsServer(port, timeout, tvs_certificate_file)
+        tvs_server = TvsServer(port, timeout, tvs_certificate_file, allow_tlsv1)
         tvs_server.run()
 
     except ProgramError as error:
