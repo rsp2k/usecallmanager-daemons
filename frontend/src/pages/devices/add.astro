@@ -1,0 +1,21 @@
+---
+import { Icon } from 'astro-icon/components';
+import DashboardLayout from '../../layouts/DashboardLayout.astro';
+import { Button } from '@/components/ui/button';
+import DeviceForm from '@/components/devices/DeviceForm';
+---
+
+<DashboardLayout title="Add Device">
+  <div class="space-y-6">
+    <div class="flex items-center gap-4">
+      <Button asChild variant="ghost" size="sm">
+        <a href="/devices">
+          <Icon name="lucide:arrow-left" class="mr-2 h-4 w-4" />
+          Back
+        </a>
+      </Button>
+    </div>
+
+    <DeviceForm client:load mode="add" />
+  </div>
+</DashboardLayout>

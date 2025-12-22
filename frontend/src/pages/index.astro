@@ -1,0 +1,195 @@
+---
+import { Icon } from 'astro-icon/components';
+import DashboardLayout from '../layouts/DashboardLayout.astro';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { getTvsHealth, getTvsStats } from '@/lib/api/tvs';
+import { getCapfHealth, getCapfStats } from '@/lib/api/capf';
+import type { HealthResponse, TvsStats, CapfStats } from '@/lib/api/types';
+
+// Fetch data server-side with error handling
+let tvsHealth: HealthResponse | null = null;
+let capfHealth: HealthResponse | null = null;
+let tvsStats: TvsStats | null = null;
+let capfStats: CapfStats | null = null;
+let tvsError: string | null = null;
+let capfError: string | null = null;
+
+try {
+  [tvsHealth, tvsStats] = await Promise.all([getTvsHealth(), getTvsStats()]);
+} catch (e) {
+  tvsError = e instanceof Error ? e.message : 'Failed to connect to TVS';
+}
+
+try {
+  [capfHealth, capfStats] = await Promise.all([getCapfHealth(), getCapfStats()]);
+} catch (e) {
+  capfError = e instanceof Error ? e.message : 'Failed to connect to CAPF';
+}
+
+const pendingOperations = capfStats
+  ? capfStats.pending_install + capfStats.pending_fetch + capfStats.pending_delete
+  : 0;
+---
+
+<DashboardLayout title="Dashboard">
+  <div class="space-y-6">
+    <!-- Stats Grid -->
+    <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <CardTitle className="text-sm font-medium">Certificates</CardTitle>
+          <Icon name="lucide:shield-check" class="h-4 w-4 text-muted-foreground" />
+        </CardHeader>
+        <CardContent>
+          <div class="text-2xl font-bold">{tvsStats?.total_certificates ?? '-'}</div>
+          <p class="text-xs text-muted-foreground">Trusted certificates</p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <CardTitle className="text-sm font-medium">Devices</CardTitle>
+          <Icon name="lucide:smartphone" class="h-4 w-4 text-muted-foreground" />
+        </CardHeader>
+        <CardContent>
+          <div class="text-2xl font-bold">{capfStats?.total_devices ?? '-'}</div>
+          <p class="text-xs text-muted-foreground">Registered devices</p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <CardTitle className="text-sm font-medium">Pending Operations</CardTitle>
+          <Icon name="lucide:clock" class="h-4 w-4 text-muted-foreground" />
+        </CardHeader>
+        <CardContent>
+          <div class="text-2xl font-bold">{pendingOperations}</div>
+          <p class="text-xs text-muted-foreground">
+            {capfStats?.pending_install ?? 0} install, {capfStats?.pending_fetch ?? 0} fetch, {capfStats?.pending_delete ?? 0} delete
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <CardTitle className="text-sm font-medium">Active Connections</CardTitle>
+          <Icon name="lucide:activity" class="h-4 w-4 text-muted-foreground" />
+        </CardHeader>
+        <CardContent>
+          <div class="text-2xl font-bold">
+            {(tvsStats?.active_connections ?? 0) + (capfStats?.active_connections ?? 0)}
+          </div>
+          <p class="text-xs text-muted-foreground">
+            TVS: {tvsStats?.active_connections ?? 0}, CAPF: {capfStats?.active_connections ?? 0}
+          </p>
+        </CardContent>
+      </Card>
+    </div>
+
+    <div class="grid gap-6 md:grid-cols-2">
+      <!-- Service Health -->
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Service Health</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <div
+                class:list={[
+                  'h-2.5 w-2.5 rounded-full',
+                  tvsHealth?.status === 'healthy' ? 'bg-success' : 'bg-destructive',
+                ]}
+              />
+              <div>
+                <p class="text-sm font-medium">TVS (Trust Verification)</p>
+                <p class="text-xs text-muted-foreground">Port {tvsHealth?.protocol_port ?? 2445}</p>
+              </div>
+            </div>
+            <Badge variant={tvsHealth?.status === 'healthy' ? 'success' : 'destructive'}>
+              {tvsError ? 'Offline' : (tvsHealth?.status ?? 'Unknown')}
+            </Badge>
+          </div>
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <div
+                class:list={[
+                  'h-2.5 w-2.5 rounded-full',
+                  capfHealth?.status === 'healthy' ? 'bg-success' : 'bg-destructive',
+                ]}
+              />
+              <div>
+                <p class="text-sm font-medium">CAPF (Certificate Authority)</p>
+                <p class="text-xs text-muted-foreground">Port {capfHealth?.protocol_port ?? 3804}</p>
+              </div>
+            </div>
+            <Badge variant={capfHealth?.status === 'healthy' ? 'success' : 'destructive'}>
+              {capfError ? 'Offline' : (capfHealth?.status ?? 'Unknown')}
+            </Badge>
+          </div>
+        </CardContent>
+      </Card>
+
+      <!-- Quick Actions -->
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Quick Actions</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <Button asChild className="w-full justify-start" variant="outline" client:load>
+            <a href="/certificates/upload">
+              <Icon name="lucide:upload" class="mr-2 h-4 w-4" />
+              Upload Certificate
+            </a>
+          </Button>
+          <Button asChild className="w-full justify-start" variant="outline" client:load>
+            <a href="/devices/add">
+              <Icon name="lucide:plus" class="mr-2 h-4 w-4" />
+              Add Device
+            </a>
+          </Button>
+          <Button asChild className="w-full justify-start" variant="outline" client:load>
+            <a href="/certificates">
+              <Icon name="lucide:shield-check" class="mr-2 h-4 w-4" />
+              View Certificates
+            </a>
+          </Button>
+          <Button asChild className="w-full justify-start" variant="outline" client:load>
+            <a href="/devices">
+              <Icon name="lucide:smartphone" class="mr-2 h-4 w-4" />
+              View Devices
+            </a>
+          </Button>
+        </CardContent>
+      </Card>
+    </div>
+
+    <!-- Error Messages -->
+    {
+      (tvsError || capfError) && (
+        <Card className="border-destructive">
+          <CardHeader>
+            <CardTitle className="text-base text-destructive">Connection Errors</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            {tvsError && (
+              <p>
+                <strong>TVS:</strong> {tvsError}
+              </p>
+            )}
+            {capfError && (
+              <p>
+                <strong>CAPF:</strong> {capfError}
+              </p>
+            )}
+            <p class="text-muted-foreground">
+              Make sure the backend services are running and accessible.
+            </p>
+          </CardContent>
+        </Card>
+      )
+    }
+  </div>
+</DashboardLayout>

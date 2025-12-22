@@ -1,0 +1,155 @@
+---
+import { Icon } from 'astro-icon/components';
+import DashboardLayout from '../../layouts/DashboardLayout.astro';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { listCertificates } from '@/lib/api/tvs';
+import type { Certificate } from '@/lib/api/types';
+
+const url = Astro.url;
+const limit = Number(url.searchParams.get('limit') || 25);
+const offset = Number(url.searchParams.get('offset') || 0);
+
+let certificates: Certificate[] = [];
+let total = 0;
+let error: string | null = null;
+
+try {
+  const response = await listCertificates(limit, offset);
+  certificates = response.items;
+  total = response.total;
+} catch (e) {
+  error = e instanceof Error ? e.message : 'Failed to fetch certificates';
+}
+
+const totalPages = Math.ceil(total / limit);
+const currentPage = Math.floor(offset / limit) + 1;
+---
+
+<DashboardLayout title="Certificates">
+  <div class="space-y-6">
+    <div class="flex items-center justify-between">
+      <div>
+        <h2 class="text-lg font-medium">Trusted Certificates</h2>
+        <p class="text-sm text-muted-foreground">
+          Manage certificates that phones trust for secure communication.
+        </p>
+      </div>
+      <Button asChild>
+        <a href="/certificates/upload">
+          <Icon name="lucide:upload" class="mr-2 h-4 w-4" />
+          Upload Certificate
+        </a>
+      </Button>
+    </div>
+
+    {
+      error ? (
+        <Card className="border-destructive">
+          <CardContent className="pt-6">
+            <p class="text-destructive">{error}</p>
+          </CardContent>
+        </Card>
+      ) : certificates.length === 0 ? (
+        <Card>
+          <CardContent className="flex flex-col items-center justify-center py-12">
+            <Icon name="lucide:shield-off" class="mb-4 h-12 w-12 text-muted-foreground" />
+            <h3 class="text-lg font-medium">No certificates found</h3>
+            <p class="text-sm text-muted-foreground mb-4">
+              Upload a certificate to get started.
+            </p>
+            <Button asChild>
+              <a href="/certificates/upload">Upload Certificate</a>
+            </Button>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card>
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Subject</TableHead>
+                  <TableHead>Roles</TableHead>
+                  <TableHead>TTL</TableHead>
+                  <TableHead>Hash</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {certificates.map((cert) => (
+                  <TableRow>
+                    <TableCell>
+                      <div>
+                        <p class="font-medium">{cert.subject_name.split(',')[0]}</p>
+                        <p class="text-xs text-muted-foreground">{cert.issuer_name.split(',')[0]}</p>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div class="flex flex-wrap gap-1">
+                        {cert.roles.map((role) => (
+                          <Badge variant="secondary" className="text-xs">
+                            {role}
+                          </Badge>
+                        ))}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <span class="text-sm">
+                        {cert.ttl >= 86400
+                          ? `${Math.floor(cert.ttl / 86400)}d`
+                          : cert.ttl >= 3600
+                            ? `${Math.floor(cert.ttl / 3600)}h`
+                            : `${cert.ttl}s`}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <code class="text-xs text-muted-foreground">
+                        {cert.certificate_hash.slice(0, 16)}...
+                      </code>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button asChild variant="ghost" size="sm">
+                        <a href={`/certificates/${cert.certificate_hash}`}>View</a>
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div class="flex items-center justify-between border-t px-6 py-4">
+              <p class="text-sm text-muted-foreground">
+                Showing {offset + 1} to {Math.min(offset + limit, total)} of {total} certificates
+              </p>
+              <div class="flex gap-2">
+                {currentPage > 1 && (
+                  <Button asChild variant="outline" size="sm">
+                    <a href={`/certificates?limit=${limit}&offset=${offset - limit}`}>Previous</a>
+                  </Button>
+                )}
+                {currentPage < totalPages && (
+                  <Button asChild variant="outline" size="sm">
+                    <a href={`/certificates?limit=${limit}&offset=${offset + limit}`}>Next</a>
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
+        </Card>
+      )
+    }
+  </div>
+</DashboardLayout>

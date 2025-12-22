@@ -1,0 +1,108 @@
+services:
+  tvs:
+    build:
+      context: .
+      dockerfile: docker/tvs/Dockerfile
+      target: ${MODE:-prod}
+    ports:
+      - "2445:2445"   # Binary protocol (phones connect directly)
+    volumes:
+      - tvs-data:/var/lib/tvs
+      - ./certs/tvs:/certs:ro
+    environment:
+      - TVS_DATABASE_URL=sqlite:////var/lib/tvs/tvs.sqlite3
+      - TVS_TLS_CERT_FILE=/certs/tvs.pem
+      - TVS_PROTOCOL_PORT=2445
+      - TVS_API_PORT=8081
+      - TVS_TIMEOUT=${TVS_TIMEOUT:-10}
+      - TVS_CLIENT_LIMIT=${TVS_CLIENT_LIMIT:-0}
+      - TVS_ALLOW_TLSV1=${TVS_ALLOW_TLSV1:-false}
+      - TVS_LOG_LEVEL=${TVS_LOG_LEVEL:-INFO}
+    networks:
+      - internal
+      - caddy
+    labels:
+      caddy: tvs.${DOMAIN:-localhost}
+      caddy.reverse_proxy: "{{upstreams 8081}}"
+    restart: unless-stopped
+    develop:
+      watch:
+        - action: sync+restart
+          path: ./src/usecallmanager_tvs
+          target: /app/src/usecallmanager_tvs
+
+  capf:
+    build:
+      context: .
+      dockerfile: docker/capf/Dockerfile
+      target: ${MODE:-prod}
+    ports:
+      - "3804:3804"   # Binary protocol (phones connect directly)
+    volumes:
+      - capf-data:/var/lib/capf
+      - ./certs/capf:/certs:ro
+    environment:
+      - CAPF_DATABASE_URL=sqlite:////var/lib/capf/capf.sqlite3
+      - CAPF_TLS_CERT_FILE=/certs/capf.pem
+      - CAPF_ISSUER_CERT_FILE=/certs/capf.pem
+      - CAPF_CERTIFICATES_DIR=/var/lib/capf/certificates
+      - CAPF_PROTOCOL_PORT=3804
+      - CAPF_API_PORT=8082
+      - CAPF_TIMEOUT=${CAPF_TIMEOUT:-10}
+      - CAPF_CLIENT_LIMIT=${CAPF_CLIENT_LIMIT:-0}
+      - CAPF_VALIDITY_DAYS=${CAPF_VALIDITY_DAYS:-365}
+      - CAPF_ALLOW_TLSV1=${CAPF_ALLOW_TLSV1:-false}
+      - CAPF_LOG_LEVEL=${CAPF_LOG_LEVEL:-INFO}
+    networks:
+      - internal
+      - caddy
+    labels:
+      caddy: capf.${DOMAIN:-localhost}
+      caddy.reverse_proxy: "{{upstreams 8082}}"
+    restart: unless-stopped
+    develop:
+      watch:
+        - action: sync+restart
+          path: ./src/usecallmanager_capf
+          target: /app/src/usecallmanager_capf
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: ${MODE:-prod}
+    environment:
+      - TVS_API_URL=http://tvs:8081
+      - CAPF_API_URL=http://capf:8082
+      - PUBLIC_TVS_API_URL=/api/tvs
+      - PUBLIC_CAPF_API_URL=/api/capf
+    networks:
+      - internal
+      - caddy
+    labels:
+      caddy: ${DOMAIN:-localhost}
+      caddy.reverse_proxy: "{{upstreams 4321}}"
+      caddy.reverse_proxy_1: /api/tvs/*
+      caddy.reverse_proxy_1.to: tvs:8081
+      caddy.rewrite_1: /api/tvs/* /api/v1{uri}
+      caddy.reverse_proxy_2: /api/capf/*
+      caddy.reverse_proxy_2.to: capf:8082
+      caddy.rewrite_2: /api/capf/* /api/v1{uri}
+    depends_on:
+      - tvs
+      - capf
+    restart: unless-stopped
+    develop:
+      watch:
+        - action: sync+restart
+          path: ./frontend/src
+          target: /app/src
+
+volumes:
+  tvs-data:
+  capf-data:
+
+networks:
+  internal:
+  caddy:
+    external: true

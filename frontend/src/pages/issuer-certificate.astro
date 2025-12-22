@@ -1,0 +1,214 @@
+---
+import { Icon } from 'astro-icon/components';
+import DashboardLayout from '../layouts/DashboardLayout.astro';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
+import { Badge } from '../components/ui/badge';
+import { getIssuerCertificate } from '../lib/api/capf';
+import type { IssuerCertificate } from '../lib/api/types';
+
+let certificate: IssuerCertificate | null = null;
+let error: string | null = null;
+
+try {
+  certificate = await getIssuerCertificate();
+} catch (e) {
+  error = e instanceof Error ? e.message : 'Failed to load issuer certificate';
+}
+
+function formatDate(isoDate: string): string {
+  return new Date(isoDate).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZoneName: 'short',
+  });
+}
+
+function isExpiringSoon(notAfter: string): boolean {
+  const expiry = new Date(notAfter);
+  const now = new Date();
+  const daysUntilExpiry = (expiry.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
+  return daysUntilExpiry < 30;
+}
+
+function isExpired(notAfter: string): boolean {
+  return new Date(notAfter) < new Date();
+}
+---
+
+<DashboardLayout title="Issuer Certificate" currentPath="/issuer-certificate">
+  <div class="space-y-6">
+    {error ? (
+      <Card>
+        <CardContent className="flex flex-col items-center justify-center py-12">
+          <Icon name="lucide:alert-circle" class="h-12 w-12 text-destructive mb-4" />
+          <h3 class="text-lg font-semibold text-destructive">Error Loading Certificate</h3>
+          <p class="text-muted-foreground mt-2">{error}</p>
+        </CardContent>
+      </Card>
+    ) : certificate ? (
+      <>
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="text-2xl font-bold tracking-tight">CAPF Issuer Certificate</h2>
+            <p class="text-muted-foreground">
+              This certificate is used to sign device certificates.
+            </p>
+          </div>
+          <div class="flex items-center gap-2">
+            {certificate.is_ca ? (
+              <Badge variant="default">CA Certificate</Badge>
+            ) : (
+              <Badge variant="secondary">End Entity</Badge>
+            )}
+            {isExpired(certificate.not_valid_after) ? (
+              <Badge variant="destructive">Expired</Badge>
+            ) : isExpiringSoon(certificate.not_valid_after) ? (
+              <Badge variant="outline" className="border-amber-500 text-amber-600">Expiring Soon</Badge>
+            ) : (
+              <Badge variant="outline" className="border-green-500 text-green-600">Valid</Badge>
+            )}
+          </div>
+        </div>
+
+        <div class="grid gap-6 md:grid-cols-2">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Icon name="lucide:file-text" class="h-5 w-5" />
+                Subject & Issuer
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <label class="text-sm font-medium text-muted-foreground">Subject</label>
+                <p class="font-mono text-sm break-all">{certificate.subject}</p>
+              </div>
+              <div>
+                <label class="text-sm font-medium text-muted-foreground">Issuer</label>
+                <p class="font-mono text-sm break-all">{certificate.issuer}</p>
+              </div>
+              <div>
+                <label class="text-sm font-medium text-muted-foreground">Serial Number</label>
+                <p class="font-mono text-sm">{certificate.serial_number}</p>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Icon name="lucide:calendar" class="h-5 w-5" />
+                Validity Period
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <label class="text-sm font-medium text-muted-foreground">Not Before</label>
+                <p class="text-sm">{formatDate(certificate.not_valid_before)}</p>
+              </div>
+              <div>
+                <label class="text-sm font-medium text-muted-foreground">Not After</label>
+                <p class="text-sm">{formatDate(certificate.not_valid_after)}</p>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Icon name="lucide:key" class="h-5 w-5" />
+                Key Information
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <label class="text-sm font-medium text-muted-foreground">Public Key Algorithm</label>
+                <p class="text-sm">{certificate.public_key_algorithm}</p>
+              </div>
+              <div>
+                <label class="text-sm font-medium text-muted-foreground">Key Size</label>
+                <p class="text-sm">{certificate.public_key_size} bits</p>
+              </div>
+              <div>
+                <label class="text-sm font-medium text-muted-foreground">Signature Algorithm</label>
+                <p class="text-sm">{certificate.signature_algorithm}</p>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Icon name="lucide:fingerprint" class="h-5 w-5" />
+                Fingerprints
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <label class="text-sm font-medium text-muted-foreground">SHA-256</label>
+                <p class="font-mono text-xs break-all">{certificate.fingerprint_sha256}</p>
+              </div>
+              <div>
+                <label class="text-sm font-medium text-muted-foreground">SHA-1</label>
+                <p class="font-mono text-xs break-all">{certificate.fingerprint_sha1}</p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Icon name="lucide:file-code" class="h-5 w-5" />
+              PEM Certificate
+            </CardTitle>
+            <CardDescription>
+              Copy this certificate to import into other systems.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div class="relative">
+              <pre class="bg-muted rounded-lg p-4 text-xs font-mono overflow-x-auto whitespace-pre">{certificate.pem}</pre>
+              <button
+                id="copy-pem"
+                class="absolute top-2 right-2 p-2 rounded-md bg-background hover:bg-accent border"
+                data-pem={certificate.pem}
+              >
+                <Icon name="lucide:copy" class="h-4 w-4" />
+              </button>
+            </div>
+          </CardContent>
+        </Card>
+      </>
+    ) : (
+      <Card>
+        <CardContent className="flex flex-col items-center justify-center py-12">
+          <Icon name="lucide:loader-2" class="h-12 w-12 text-muted-foreground animate-spin" />
+          <p class="text-muted-foreground mt-4">Loading certificate...</p>
+        </CardContent>
+      </Card>
+    )}
+  </div>
+</DashboardLayout>
+
+<script>
+  const copyBtn = document.getElementById('copy-pem');
+  if (copyBtn) {
+    copyBtn.addEventListener('click', async () => {
+      const pem = copyBtn.getAttribute('data-pem');
+      if (pem) {
+        await navigator.clipboard.writeText(pem);
+        const icon = copyBtn.querySelector('svg');
+        if (icon) {
+          icon.innerHTML = '<polyline points="20 6 9 17 4 12"></polyline>';
+          setTimeout(() => {
+            icon.innerHTML = '<rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path>';
+          }, 2000);
+        }
+      }
+    });
+  }
+</script>

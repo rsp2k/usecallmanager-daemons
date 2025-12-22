@@ -1,2 +1,27 @@
 *~
 *.swp
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+*.egg-info/
+dist/
+build/
+
+# uv
+uv.lock
+
+# Environment
+.env
+
+# SQLite databases
+*.sqlite3
+
+# Certificates (sensitive)
+certs/
+
+# IDE
+.idea/
+.vscode/

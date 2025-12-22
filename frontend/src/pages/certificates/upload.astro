@@ -1,0 +1,21 @@
+---
+import { Icon } from 'astro-icon/components';
+import DashboardLayout from '../../layouts/DashboardLayout.astro';
+import { Button } from '@/components/ui/button';
+import CertificateUploadForm from '@/components/certificates/CertificateUploadForm';
+---
+
+<DashboardLayout title="Upload Certificate">
+  <div class="space-y-6">
+    <div class="flex items-center gap-4">
+      <Button asChild variant="ghost" size="sm">
+        <a href="/certificates">
+          <Icon name="lucide:arrow-left" class="mr-2 h-4 w-4" />
+          Back
+        </a>
+      </Button>
+    </div>
+
+    <CertificateUploadForm client:load />
+  </div>
+</DashboardLayout>

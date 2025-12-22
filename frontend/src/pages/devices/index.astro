@@ -1,0 +1,191 @@
+---
+import { Icon } from 'astro-icon/components';
+import DashboardLayout from '../../layouts/DashboardLayout.astro';
+import { Card, CardContent } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { listDevices } from '@/lib/api/capf';
+import type { Device, OperationType } from '@/lib/api/types';
+
+const url = Astro.url;
+const limit = Number(url.searchParams.get('limit') || 25);
+const offset = Number(url.searchParams.get('offset') || 0);
+const operationFilter = url.searchParams.get('operation') as OperationType | null;
+
+let devices: Device[] = [];
+let total = 0;
+let error: string | null = null;
+
+try {
+  const response = await listDevices(limit, offset, operationFilter || undefined);
+  devices = response.items;
+  total = response.total;
+} catch (e) {
+  error = e instanceof Error ? e.message : 'Failed to fetch devices';
+}
+
+const totalPages = Math.ceil(total / limit);
+const currentPage = Math.floor(offset / limit) + 1;
+
+function getOperationBadgeVariant(operation: string) {
+  switch (operation) {
+    case 'install':
+      return 'default';
+    case 'fetch':
+      return 'secondary';
+    case 'delete':
+      return 'destructive';
+    default:
+      return 'outline';
+  }
+}
+
+function buildUrl(params: Record<string, string | number | null>) {
+  const searchParams = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== null && value !== undefined) {
+      searchParams.set(key, String(value));
+    }
+  });
+  return `/devices?${searchParams.toString()}`;
+}
+---
+
+<DashboardLayout title="Devices">
+  <div class="space-y-6">
+    <div class="flex items-center justify-between">
+      <div>
+        <h2 class="text-lg font-medium">Device Management</h2>
+        <p class="text-sm text-muted-foreground">
+          Manage device certificate enrollment operations.
+        </p>
+      </div>
+      <Button asChild>
+        <a href="/devices/add">
+          <Icon name="lucide:plus" class="mr-2 h-4 w-4" />
+          Add Device
+        </a>
+      </Button>
+    </div>
+
+    {/* Filter */}
+    <div class="flex gap-2">
+      <Button asChild variant={!operationFilter ? 'default' : 'outline'} size="sm">
+        <a href="/devices">All</a>
+      </Button>
+      <Button asChild variant={operationFilter === 'install' ? 'default' : 'outline'} size="sm">
+        <a href={buildUrl({ operation: 'install', limit, offset: 0 })}>Install</a>
+      </Button>
+      <Button asChild variant={operationFilter === 'fetch' ? 'default' : 'outline'} size="sm">
+        <a href={buildUrl({ operation: 'fetch', limit, offset: 0 })}>Fetch</a>
+      </Button>
+      <Button asChild variant={operationFilter === 'delete' ? 'default' : 'outline'} size="sm">
+        <a href={buildUrl({ operation: 'delete', limit, offset: 0 })}>Delete</a>
+      </Button>
+      <Button asChild variant={operationFilter === 'none' ? 'default' : 'outline'} size="sm">
+        <a href={buildUrl({ operation: 'none', limit, offset: 0 })}>None</a>
+      </Button>
+    </div>
+
+    {
+      error ? (
+        <Card className="border-destructive">
+          <CardContent className="pt-6">
+            <p class="text-destructive">{error}</p>
+          </CardContent>
+        </Card>
+      ) : devices.length === 0 ? (
+        <Card>
+          <CardContent className="flex flex-col items-center justify-center py-12">
+            <Icon name="lucide:smartphone" class="mb-4 h-12 w-12 text-muted-foreground" />
+            <h3 class="text-lg font-medium">No devices found</h3>
+            <p class="text-sm text-muted-foreground mb-4">
+              {operationFilter ? `No devices with operation: ${operationFilter}` : 'Add a device to get started.'}
+            </p>
+            <Button asChild>
+              <a href="/devices/add">Add Device</a>
+            </Button>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card>
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Device Name</TableHead>
+                  <TableHead>Operation</TableHead>
+                  <TableHead>Authentication</TableHead>
+                  <TableHead>Certificate</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {devices.map((device) => (
+                  <TableRow>
+                    <TableCell>
+                      <code class="text-sm font-medium">{device.device_name}</code>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={getOperationBadgeVariant(device.operation)}>
+                        {device.operation}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <span class="text-sm">{device.authentication || '-'}</span>
+                    </TableCell>
+                    <TableCell>
+                      {device.has_certificate ? (
+                        <Badge variant="success">Installed</Badge>
+                      ) : (
+                        <span class="text-sm text-muted-foreground">None</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button asChild variant="ghost" size="sm">
+                        <a href={`/devices/${device.device_name}`}>View</a>
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div class="flex items-center justify-between border-t px-6 py-4">
+              <p class="text-sm text-muted-foreground">
+                Showing {offset + 1} to {Math.min(offset + limit, total)} of {total} devices
+              </p>
+              <div class="flex gap-2">
+                {currentPage > 1 && (
+                  <Button asChild variant="outline" size="sm">
+                    <a href={buildUrl({ operation: operationFilter, limit, offset: offset - limit })}>
+                      Previous
+                    </a>
+                  </Button>
+                )}
+                {currentPage < totalPages && (
+                  <Button asChild variant="outline" size="sm">
+                    <a href={buildUrl({ operation: operationFilter, limit, offset: offset + limit })}>
+                      Next
+                    </a>
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
+        </Card>
+      )
+    }
+  </div>
+</DashboardLayout>

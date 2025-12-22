@@ -1,0 +1,168 @@
+---
+import { Icon } from 'astro-icon/components';
+import DashboardLayout from '../../layouts/DashboardLayout.astro';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { getDevice, exportDeviceCertificate } from '@/lib/api/capf';
+import DeviceActions from '@/components/devices/DeviceActions';
+import type { Device } from '@/lib/api/types';
+
+const { name } = Astro.params;
+
+let device: Device | null = null;
+let pem: string | null = null;
+let error: string | null = null;
+
+if (!name) {
+  return Astro.redirect('/devices');
+}
+
+try {
+  device = await getDevice(name);
+  if (device.has_certificate) {
+    try {
+      pem = await exportDeviceCertificate(name);
+    } catch {
+      // Certificate export might fail, that's ok
+    }
+  }
+} catch (e) {
+  error = e instanceof Error ? e.message : 'Device not found';
+}
+
+function getOperationBadgeVariant(operation: string) {
+  switch (operation) {
+    case 'install':
+      return 'default';
+    case 'fetch':
+      return 'secondary';
+    case 'delete':
+      return 'destructive';
+    default:
+      return 'outline';
+  }
+}
+---
+
+<DashboardLayout title={device ? `Device: ${device.device_name}` : 'Device'}>
+  <div class="space-y-6">
+    <div class="flex items-center gap-4">
+      <Button asChild variant="ghost" size="sm">
+        <a href="/devices">
+          <Icon name="lucide:arrow-left" class="mr-2 h-4 w-4" />
+          Back
+        </a>
+      </Button>
+    </div>
+
+    {
+      error ? (
+        <Card className="border-destructive">
+          <CardContent className="pt-6">
+            <p class="text-destructive">{error}</p>
+          </CardContent>
+        </Card>
+      ) : device && (
+        <>
+          <div class="flex items-start justify-between">
+            <div>
+              <h2 class="text-xl font-semibold font-mono">{device.device_name}</h2>
+              <div class="flex items-center gap-2 mt-2">
+                <Badge variant={getOperationBadgeVariant(device.operation)}>
+                  {device.operation}
+                </Badge>
+                {device.has_certificate && <Badge variant="success">Certificate Installed</Badge>}
+              </div>
+            </div>
+            <DeviceActions client:load device={device} />
+          </div>
+
+          <div class="grid gap-6 md:grid-cols-2">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Device Details</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div>
+                  <p class="text-sm font-medium text-muted-foreground">Device Name</p>
+                  <code class="text-sm">{device.device_name}</code>
+                </div>
+                <div>
+                  <p class="text-sm font-medium text-muted-foreground">Operation</p>
+                  <p class="text-sm capitalize">{device.operation}</p>
+                </div>
+                <div>
+                  <p class="text-sm font-medium text-muted-foreground">Authentication</p>
+                  <p class="text-sm">{device.authentication || 'Not set'}</p>
+                </div>
+                {device.key_size && (
+                  <div>
+                    <p class="text-sm font-medium text-muted-foreground">Key Size</p>
+                    <p class="text-sm">{device.key_size} bits (RSA)</p>
+                  </div>
+                )}
+                {device.curve_name && (
+                  <div>
+                    <p class="text-sm font-medium text-muted-foreground">Curve</p>
+                    <p class="text-sm">{device.curve_name} (EC)</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Certificate Status</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div>
+                  <p class="text-sm font-medium text-muted-foreground">Status</p>
+                  <p class="text-sm">{device.has_certificate ? 'Installed' : 'Not installed'}</p>
+                </div>
+                {device.serial_number && (
+                  <div>
+                    <p class="text-sm font-medium text-muted-foreground">Serial Number</p>
+                    <code class="text-xs">{device.serial_number}</code>
+                  </div>
+                )}
+                {device.not_valid_before && (
+                  <div>
+                    <p class="text-sm font-medium text-muted-foreground">Valid From</p>
+                    <p class="text-sm">{device.not_valid_before}</p>
+                  </div>
+                )}
+                {device.not_valid_after && (
+                  <div>
+                    <p class="text-sm font-medium text-muted-foreground">Valid Until</p>
+                    <p class="text-sm">{device.not_valid_after}</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {pem && (
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <CardTitle className="text-base">Device Certificate</CardTitle>
+                <Button asChild variant="outline" size="sm">
+                  <a
+                    href={`data:application/x-pem-file;base64,${btoa(pem)}`}
+                    download={`${device.device_name}.pem`}
+                  >
+                    <Icon name="lucide:download" class="mr-2 h-4 w-4" />
+                    Download PEM
+                  </a>
+                </Button>
+              </CardHeader>
+              <CardContent>
+                <pre class="overflow-x-auto rounded-lg bg-muted p-4 text-xs">{pem}</pre>
+              </CardContent>
+            </Card>
+          )}
+        </>
+      )
+    }
+  </div>
+</DashboardLayout>

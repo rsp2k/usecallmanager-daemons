@@ -1,0 +1,59 @@
+---
+import { Icon } from 'astro-icon/components';
+import DashboardLayout from '../../../layouts/DashboardLayout.astro';
+import { Card, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import DeviceForm from '@/components/devices/DeviceForm';
+import { getDevice } from '@/lib/api/capf';
+import type { Device } from '@/lib/api/types';
+
+const { name } = Astro.params;
+
+let device: Device | null = null;
+let error: string | null = null;
+
+if (!name) {
+  return Astro.redirect('/devices');
+}
+
+try {
+  device = await getDevice(name);
+} catch (e) {
+  error = e instanceof Error ? e.message : 'Device not found';
+}
+---
+
+<DashboardLayout title={device ? `Edit: ${device.device_name}` : 'Edit Device'}>
+  <div class="space-y-6">
+    <div class="flex items-center gap-4">
+      <Button asChild variant="ghost" size="sm">
+        <a href={device ? `/devices/${device.device_name}` : '/devices'}>
+          <Icon name="lucide:arrow-left" class="mr-2 h-4 w-4" />
+          Back
+        </a>
+      </Button>
+    </div>
+
+    {
+      error ? (
+        <Card className="border-destructive">
+          <CardContent className="pt-6">
+            <p class="text-destructive">{error}</p>
+          </CardContent>
+        </Card>
+      ) : device && (
+        <DeviceForm
+          client:load
+          mode="edit"
+          initialData={{
+            device_name: device.device_name,
+            operation: device.operation,
+            authentication: device.authentication,
+            key_size: device.key_size,
+            curve_name: device.curve_name,
+          }}
+        />
+      )
+    }
+  </div>
+</DashboardLayout>

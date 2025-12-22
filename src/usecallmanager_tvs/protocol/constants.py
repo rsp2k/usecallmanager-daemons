@@ -1,0 +1,46 @@
+"""TVS protocol constants."""
+
+# Protocol identification
+PROTOCOL_ID = 87
+PROTOCOL_VERSION = 1
+
+# Commands
+COMMAND_NONE = 0
+COMMAND_VERIFY_REQUEST = 1
+COMMAND_VERIFY_RESPONSE = 2
+COMMAND_QUERY_REQUEST = 3
+COMMAND_QUERY_RESPONSE = 4
+
+# Elements (TLV tags)
+ELEMENT_DEVICE_NAME = 1
+ELEMENT_CERTIFICATE = 2
+ELEMENT_STATUS = 7
+ELEMENT_ROLES = 8
+ELEMENT_TTL = 9
+
+# Status codes
+STATUS_VALID = 0
+STATUS_INVALID = 1
+
+# Role identifiers
+ROLE_SAST = 0
+ROLE_CCM = 1
+ROLE_CCM_TFTP = 2
+ROLE_TFTP = 3
+ROLE_CAPF = 4
+ROLE_APP_SERVER = 7
+ROLE_TVS = 21
+
+# Role name to byte mapping
+ROLE_NAME_TO_BYTE = {
+    "SAST": ROLE_SAST,
+    "CCM": ROLE_CCM,
+    "CCM+TFTP": ROLE_CCM_TFTP,
+    "TFTP": ROLE_TFTP,
+    "CAPF": ROLE_CAPF,
+    "APP-SERVER": ROLE_APP_SERVER,
+    "TVS": ROLE_TVS,
+}
+
+# Valid role names
+VALID_ROLES = frozenset(ROLE_NAME_TO_BYTE.keys())

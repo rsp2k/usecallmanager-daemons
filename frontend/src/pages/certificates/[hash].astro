@@ -1,0 +1,140 @@
+---
+import { Icon } from 'astro-icon/components';
+import DashboardLayout from '../../layouts/DashboardLayout.astro';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { getCertificate, exportCertificatePem } from '@/lib/api/tvs';
+import CertificateActions from '@/components/certificates/CertificateActions';
+import type { Certificate } from '@/lib/api/types';
+
+const { hash } = Astro.params;
+
+let certificate: Certificate | null = null;
+let pem: string | null = null;
+let error: string | null = null;
+
+if (!hash) {
+  return Astro.redirect('/certificates');
+}
+
+try {
+  certificate = await getCertificate(hash);
+  pem = await exportCertificatePem(hash);
+} catch (e) {
+  error = e instanceof Error ? e.message : 'Certificate not found';
+}
+---
+
+<DashboardLayout title={certificate ? `Certificate: ${certificate.subject_name.split(',')[0]}` : 'Certificate'}>
+  <div class="space-y-6">
+    <div class="flex items-center gap-4">
+      <Button asChild variant="ghost" size="sm">
+        <a href="/certificates">
+          <Icon name="lucide:arrow-left" class="mr-2 h-4 w-4" />
+          Back
+        </a>
+      </Button>
+    </div>
+
+    {
+      error ? (
+        <Card className="border-destructive">
+          <CardContent className="pt-6">
+            <p class="text-destructive">{error}</p>
+          </CardContent>
+        </Card>
+      ) : certificate && (
+        <>
+          <div class="flex items-start justify-between">
+            <div>
+              <h2 class="text-xl font-semibold">{certificate.subject_name.split(',')[0]}</h2>
+              <p class="text-sm text-muted-foreground">{certificate.issuer_name}</p>
+            </div>
+            <CertificateActions
+              client:load
+              hash={certificate.certificate_hash}
+              subjectName={certificate.subject_name.split(',')[0]}
+            />
+          </div>
+
+          <div class="grid gap-6 md:grid-cols-2">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Details</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div>
+                  <p class="text-sm font-medium text-muted-foreground">Subject Name</p>
+                  <p class="text-sm">{certificate.subject_name}</p>
+                </div>
+                <div>
+                  <p class="text-sm font-medium text-muted-foreground">Issuer Name</p>
+                  <p class="text-sm">{certificate.issuer_name}</p>
+                </div>
+                <div>
+                  <p class="text-sm font-medium text-muted-foreground">Serial Number</p>
+                  <code class="text-sm">{certificate.serial_number}</code>
+                </div>
+                <div>
+                  <p class="text-sm font-medium text-muted-foreground">TTL</p>
+                  <p class="text-sm">
+                    {certificate.ttl >= 86400
+                      ? `${Math.floor(certificate.ttl / 86400)} days`
+                      : certificate.ttl >= 3600
+                        ? `${Math.floor(certificate.ttl / 3600)} hours`
+                        : `${certificate.ttl} seconds`}
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Roles & Hash</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div>
+                  <p class="text-sm font-medium text-muted-foreground mb-2">Roles</p>
+                  <div class="flex flex-wrap gap-2">
+                    {certificate.roles.map((role) => (
+                      <Badge variant="secondary">{role}</Badge>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <p class="text-sm font-medium text-muted-foreground">Certificate Hash (SHA-256)</p>
+                  <code class="text-xs break-all">{certificate.certificate_hash}</code>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {pem && (
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <CardTitle className="text-base">PEM Certificate</CardTitle>
+                <Button
+                  asChild
+                  variant="outline"
+                  size="sm"
+                >
+                  <a
+                    href={`data:application/x-pem-file;base64,${btoa(pem)}`}
+                    download={`${certificate.certificate_hash.slice(0, 16)}.pem`}
+                  >
+                    <Icon name="lucide:download" class="mr-2 h-4 w-4" />
+                    Download PEM
+                  </a>
+                </Button>
+              </CardHeader>
+              <CardContent>
+                <pre class="overflow-x-auto rounded-lg bg-muted p-4 text-xs">{pem}</pre>
+              </CardContent>
+            </Card>
+          )}
+        </>
+      )
+    }
+  </div>
+</DashboardLayout>
