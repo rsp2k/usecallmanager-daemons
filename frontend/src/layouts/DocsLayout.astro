@@ -1,0 +1,84 @@
+---
+import BaseLayout from './BaseLayout.astro';
+import { getCollection } from 'astro:content';
+
+interface Props {
+  title: string;
+  description: string;
+}
+
+const { title, description } = Astro.props;
+
+// Get all docs for navigation
+const allDocs = await getCollection('docs');
+const sortedDocs = allDocs.sort((a, b) => {
+  const orderA = a.data.order || 999;
+  const orderB = b.data.order || 999;
+  return orderA - orderB;
+});
+
+// Group by category
+const categories = {
+  'getting-started': sortedDocs.filter(doc => doc.data.category === 'getting-started'),
+  'api': sortedDocs.filter(doc => doc.data.category === 'api'),
+  'security': sortedDocs.filter(doc => doc.data.category === 'security'),
+  'deployment': sortedDocs.filter(doc => doc.data.category === 'deployment'),
+  'other': sortedDocs.filter(doc => !doc.data.category),
+};
+
+const categoryLabels = {
+  'getting-started': 'Getting Started',
+  'api': 'API Reference',
+  'security': 'Security',
+  'deployment': 'Deployment',
+  'other': 'Other',
+};
+---
+
+<BaseLayout title={title}>
+  <div class="flex min-h-[calc(100vh-4rem)]">
+    <!-- Sidebar Navigation -->
+    <aside class="w-64 border-r bg-muted/10 p-6 overflow-y-auto">
+      <nav class="space-y-6">
+        {Object.entries(categories).map(([category, docs]) => {
+          if (docs.length === 0) return null;
+          return (
+            <div>
+              <h3 class="font-semibold text-sm text-muted-foreground uppercase tracking-wider mb-3">
+                {categoryLabels[category as keyof typeof categoryLabels]}
+              </h3>
+              <ul class="space-y-2">
+                {docs.map((doc) => {
+                  // Remove .md extension from doc.id for the URL
+                  const docPath = doc.id.replace(/\.md$/, '');
+                  const isActive = Astro.url.pathname === `/docs/${docPath}`;
+                  return (
+                    <li>
+                      <a
+                        href={`/docs/${docPath}`}
+                        class={`block text-sm px-3 py-2 rounded-md transition-colors ${
+                          isActive
+                            ? 'bg-primary text-primary-foreground font-medium'
+                            : 'hover:bg-muted text-foreground'
+                        }`}
+                      >
+                        {doc.data.title}
+                      </a>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          );
+        })}
+      </nav>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="flex-1 p-8 max-w-4xl">
+      <article class="prose prose-slate dark:prose-invert max-w-none">
+        <slot />
+      </article>
+    </main>
+  </div>
+</BaseLayout>

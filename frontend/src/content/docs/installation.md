@@ -1,0 +1,177 @@
+---
+title: Installation & Setup
+description: Deploy UseCallManager security services with Docker Compose
+order: 2
+category: getting-started
+---
+
+# Installation & Setup
+
+UseCallManager security services are deployed using Docker Compose for easy setup and management.
+
+## Prerequisites
+
+- Docker Engine 20.10+
+- Docker Compose V2
+- Domain name with DNS configured (for TLS certificates)
+- Caddy reverse proxy (for HTTPS termination)
+
+## Quick Start
+
+### 1. Clone the Repository
+
+```bash
+git clone https://github.com/rsp2k/usecallmanager-daemons.git
+cd usecallmanager-daemons
+```
+
+### 2. Configure Environment
+
+Create a `.env` file:
+
+```bash
+# Project name (prevents namespace conflicts)
+COMPOSE_PROJECT=usecallmanager
+
+# Domain configuration
+DOMAIN=usecallmanager-services.example.com
+
+# Database (optional, defaults to SQLite)
+# CAPF_DATABASE_URL=postgresql://user:pass@localhost/capf
+# TVS_DATABASE_URL=postgresql://user:pass@localhost/tvs
+```
+
+### 3. Start Services
+
+```bash
+docker compose up -d
+```
+
+This starts:
+- **CAPF** - Port 3804 (protocol), Port 8082 (API)
+- **TVS** - Port 8081 (API)
+- **Frontend** - Port 4321 (web UI)
+- **Caddy** - Reverse proxy with automatic HTTPS
+
+### 4. Verify Services
+
+Check health endpoints:
+
+```bash
+curl https://$DOMAIN/api/capf/api/v1/health
+curl https://$DOMAIN/api/tvs/api/v1/health
+```
+
+Expected response:
+```json
+{
+  "status": "healthy",
+  "version": "4.0.0",
+  "database": "connected"
+}
+```
+
+## Configuration
+
+### CAPF Settings
+
+Environment variables for CAPF service:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CAPF_PROTOCOL_PORT` | `3804` | CAPF protocol port for phones |
+| `CAPF_API_PORT` | `8082` | REST API port |
+| `CAPF_DATABASE_URL` | `sqlite:///var/lib/capf/capf.sqlite3` | Database connection string |
+| `CAPF_CERT_DIR` | `/var/lib/capf/certificates` | Certificate storage directory |
+| `CAPF_KEY_SIZE` | `2048` | Default RSA key size for issuer |
+
+### TVS Settings
+
+Environment variables for TVS service:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TVS_API_PORT` | `8081` | REST API port |
+| `TVS_DATABASE_URL` | `sqlite:///var/lib/tvs/tvs.sqlite3` | Database connection string |
+
+### Caddy Reverse Proxy
+
+The `docker-compose.yml` includes Caddy labels for automatic reverse proxy configuration:
+
+```yaml
+services:
+  frontend:
+    labels:
+      caddy: ${DOMAIN}
+      caddy.reverse_proxy: "{{upstreams 4321}}"
+```
+
+Services are automatically available at:
+- Frontend: `https://$DOMAIN/`
+- CAPF API: `https://$DOMAIN/api/capf/`
+- TVS API: `https://$DOMAIN/api/tvs/`
+
+## Initial Setup
+
+### Generate Issuer Certificate
+
+After starting services, generate the CAPF issuer certificate:
+
+1. Navigate to **Issuer Certificate** page
+2. Click **Generate New Issuer Certificate**
+3. Configure:
+   - Common Name: `CAPF-SAST` (or your preferred name)
+   - Organization: `UseCallManager`
+   - Country: `NZ` (or your country code)
+   - Key Type: RSA 2048-bit (recommended)
+   - Validity: 10 years
+
+The issuer certificate is used to sign device certificates (LSCs).
+
+## Persistence
+
+Data is stored in Docker volumes:
+
+```bash
+# View volumes
+docker volume ls | grep usecallmanager
+
+# Backup volumes
+docker run --rm -v usecallmanager_capf-data:/data \
+  -v $(pwd):/backup alpine \
+  tar czf /backup/capf-backup.tar.gz -C /data .
+```
+
+## Troubleshooting
+
+### Check Logs
+
+```bash
+# All services
+docker compose logs -f
+
+# Specific service
+docker compose logs -f capf
+docker compose logs -f tvs
+docker compose logs -f frontend
+```
+
+### Database Connection Issues
+
+If using PostgreSQL, ensure the database exists:
+
+```bash
+createdb -U postgres capf
+createdb -U postgres tvs
+```
+
+### Port Conflicts
+
+If ports 3804, 8081, 8082, or 4321 are in use, modify `docker-compose.yml` to use different ports.
+
+### Certificate Issues
+
+If Caddy cannot obtain certificates, check:
+- DNS is correctly configured
+- Port 443 is accessible from the internet
+- Domain ownership verification
