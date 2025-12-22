@@ -82,12 +82,10 @@ services:
     labels:
       caddy: ${DOMAIN:-localhost}
       caddy.reverse_proxy: "{{upstreams 4321}}"
-      caddy.reverse_proxy_1: /api/tvs/*
-      caddy.reverse_proxy_1.to: tvs:8081
-      caddy.rewrite_1: /api/tvs/* /api/v1{uri}
-      caddy.reverse_proxy_2: /api/capf/*
-      caddy.reverse_proxy_2.to: capf:8082
-      caddy.rewrite_2: /api/capf/* /api/v1{uri}
+      caddy.handle_path_0: /api/tvs/*
+      caddy.handle_path_0.reverse_proxy: tvs:8081
+      caddy.handle_path_1: /api/capf/*
+      caddy.handle_path_1.reverse_proxy: capf:8082
     depends_on:
       - tvs
       - capf

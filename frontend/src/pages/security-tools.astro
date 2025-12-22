@@ -1,0 +1,93 @@
+---
+import { Icon } from 'astro-icon/components';
+import DashboardLayout from '../layouts/DashboardLayout.astro';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
+import ITLGenerator from '../components/security/ITLGenerator';
+import ConfigEncryptor from '../components/security/ConfigEncryptor';
+---
+
+<DashboardLayout title="Security Tools" currentPath="/security-tools">
+  <div class="space-y-6">
+    <div>
+      <h2 class="text-2xl font-bold tracking-tight">Security Tools</h2>
+      <p class="text-muted-foreground">
+        Generate ITL files and encrypt device configurations.
+      </p>
+    </div>
+
+    <div class="grid gap-6 lg:grid-cols-2">
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Icon name="lucide:file-lock" class="h-5 w-5" />
+            ITL File Generator
+          </CardTitle>
+          <CardDescription>
+            Create ITLFile.tlv for phone trust verification. Add certificates with roles
+            and sign with your SAST certificate.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ITLGenerator client:load />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Icon name="lucide:lock" class="h-5 w-5" />
+            Config Encryptor
+          </CardTitle>
+          <CardDescription>
+            Encrypt configuration files for specific devices. Uses the device's LSC
+            certificate so only that phone can decrypt it.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ConfigEncryptor client:load />
+        </CardContent>
+      </Card>
+    </div>
+
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Icon name="lucide:info" class="h-5 w-5" />
+          How It Works
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="prose prose-sm dark:prose-invert max-w-none">
+        <div class="grid gap-6 md:grid-cols-2">
+          <div>
+            <h4 class="font-semibold mb-2">ITL Files</h4>
+            <p class="text-sm text-muted-foreground">
+              The Initial Trust List (ITL) contains certificates that phones use to verify
+              TLS connections. When a phone boots, it downloads ITLFile.tlv from TFTP and
+              uses these certificates to authenticate infrastructure services.
+            </p>
+            <ul class="text-sm text-muted-foreground mt-2 space-y-1">
+              <li><strong>SAST</strong> - Signs ITL updates</li>
+              <li><strong>CCM</strong> - Call Manager SIP-TLS</li>
+              <li><strong>TFTP</strong> - Secure file downloads</li>
+              <li><strong>CAPF</strong> - Certificate provisioning</li>
+              <li><strong>TVS</strong> - Trust verification</li>
+            </ul>
+          </div>
+          <div>
+            <h4 class="font-semibold mb-2">Encrypted Configs</h4>
+            <p class="text-sm text-muted-foreground">
+              Config files are encrypted with AES-128-CBC using a random key. The AES key
+              is then encrypted with the device's public key (from its LSC certificate),
+              ensuring only that specific phone can decrypt the configuration.
+            </p>
+            <ul class="text-sm text-muted-foreground mt-2 space-y-1">
+              <li><strong>Hybrid encryption</strong> - Fast + secure</li>
+              <li><strong>Device-specific</strong> - Only target can decrypt</li>
+              <li><strong>Signed</strong> - Integrity verification</li>
+            </ul>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  </div>
+</DashboardLayout>
