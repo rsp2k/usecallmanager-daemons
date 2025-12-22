@@ -9,8 +9,10 @@ from usecallmanager_capf.api.schemas import (
     DeviceListResponse,
     DeviceOperationUpdate,
     DeviceResponse,
+    EncryptConfigRequest,
     HealthResponse,
     IssuerCertificateResponse,
+    ITLFileRequest,
     StatsResponse,
 )
 from usecallmanager_capf.db.repository import DeviceRepository
@@ -244,3 +246,119 @@ async def export_device_certificate(
     from fastapi.responses import PlainTextResponse
 
     return PlainTextResponse(content=pem, media_type="application/x-pem-file")
+
+
+# Security APIs for ITL generation and config encryption
+
+
+@router.post("/itl-file")
+async def generate_itl_file(data: ITLFileRequest):
+    """Generate an ITL (Initial Trust List) file.
+
+    The ITL file contains trusted certificates that phones use to verify
+    TLS connections to infrastructure services.
+
+    Returns the binary ITL file as application/octet-stream.
+    """
+    from fastapi.responses import Response
+
+    from usecallmanager_capf.security.itl import ITLBuilder
+
+    try:
+        builder = ITLBuilder()
+
+        for cert_entry in data.certificates:
+            builder.add_certificate(cert_entry.pem, cert_entry.roles)
+
+        itl_bytes = builder.build(
+            signer_cert_pem=data.signer.certificate_pem,
+            signer_key_pem=data.signer.private_key_pem,
+        )
+
+        return Response(
+            content=itl_bytes,
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": "attachment; filename=ITLFile.tlv"},
+        )
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"ITL generation failed: {e}") from e
+
+
+@router.post("/encrypt-config")
+async def encrypt_config_file(
+    data: EncryptConfigRequest,
+    repo: Annotated[DeviceRepository, Depends(get_repository)],
+):
+    """Encrypt a configuration file for a specific device.
+
+    The encrypted file can only be decrypted by the target device using
+    its private key (LSC). Returns the binary .enc.sgn file.
+
+    Requires:
+    - Device must exist in the database
+    - Device must have a certificate (LSC) installed
+    """
+    from cryptography import x509
+    from cryptography.hazmat.primitives import serialization
+    from fastapi.responses import Response
+
+    from usecallmanager_capf.security.encryption import encrypt_config
+    from usecallmanager_capf.service import _config
+
+    # Get device certificate
+    device = repo.get_by_name(data.device_name)
+    if device is None:
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    if device.certificate is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Device does not have a certificate installed",
+        )
+
+    # Load issuer certificate and key for signing
+    if _config is None or not _config.issuer_cert_file:
+        raise HTTPException(
+            status_code=500, detail="Issuer certificate not configured"
+        )
+
+    try:
+        with open(_config.issuer_cert_file, "rb") as f:
+            issuer_data = f.read()
+
+        # Parse issuer cert and key
+        signer_cert = x509.load_pem_x509_certificate(issuer_data)
+        signer_key = serialization.load_pem_private_key(issuer_data, password=None)
+
+        # Parse device certificate
+        device_cert = x509.load_pem_x509_certificate(device.certificate.encode())
+
+        # Encrypt the config
+        encrypted = encrypt_config(
+            config_xml=data.config_xml,
+            device_name=data.device_name,
+            device_cert=device_cert,
+            signer_cert=signer_cert,
+            signer_key=signer_key,
+        )
+
+        filename = f"{data.device_name}.cnf.xml.enc.sgn"
+        return Response(
+            content=encrypted,
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
+        )
+
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=500, detail="Issuer certificate file not found"
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Config encryption failed: {e}"
+        ) from e

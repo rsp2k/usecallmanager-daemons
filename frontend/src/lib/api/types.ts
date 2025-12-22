@@ -104,3 +104,25 @@ export interface HealthResponse {
 export interface ApiError {
   detail: string;
 }
+
+// ITL File Generation Types
+export interface ITLCertificateEntry {
+  pem: string;
+  roles: RoleType[];
+}
+
+export interface SignerCredentials {
+  certificate_pem: string;
+  private_key_pem: string;
+}
+
+export interface ITLFileRequest {
+  certificates: ITLCertificateEntry[];
+  signer: SignerCredentials;
+}
+
+// Config Encryption Types
+export interface EncryptConfigRequest {
+  device_name: string;
+  config_xml: string;
+}

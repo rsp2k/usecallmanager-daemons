@@ -81,6 +81,26 @@ export class ApiClient {
 
     return response.text();
   }
+
+  async postBlob(path: string, body?: unknown): Promise<Blob> {
+    const url = `${this.baseUrl}${path}`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+
+    if (!response.ok) {
+      const error: ApiError = await response.json().catch(() => ({
+        detail: `HTTP ${response.status}: ${response.statusText}`,
+      }));
+      throw new Error(error.detail);
+    }
+
+    return response.blob();
+  }
 }
 
 // Create API clients for server-side and client-side use

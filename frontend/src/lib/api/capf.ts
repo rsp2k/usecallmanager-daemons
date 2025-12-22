@@ -5,8 +5,10 @@ import type {
   DeviceCreate,
   DeviceListResponse,
   DeviceOperationUpdate,
+  EncryptConfigRequest,
   HealthResponse,
   IssuerCertificate,
+  ITLFileRequest,
   OperationType,
 } from './types';
 
@@ -96,6 +98,14 @@ export function createCapfApi() {
 
     async getIssuerCertificate(): Promise<IssuerCertificate> {
       return client.get<IssuerCertificate>('/issuer-certificate');
+    },
+
+    async generateItlFile(request: ITLFileRequest): Promise<Blob> {
+      return client.postBlob('/itl-file', request);
+    },
+
+    async encryptConfig(request: EncryptConfigRequest): Promise<Blob> {
+      return client.postBlob('/encrypt-config', request);
     },
   };
 }

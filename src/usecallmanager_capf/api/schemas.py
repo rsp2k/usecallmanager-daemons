@@ -118,3 +118,38 @@ class IssuerCertificateResponse(BaseModel):
     signature_algorithm: str
     is_ca: bool
     pem: str
+
+
+# ITL File Generation Schemas
+RoleType = Literal["SAST", "CCM", "CCM+TFTP", "TFTP", "CAPF", "APP-SERVER", "TVS"]
+
+
+class ITLCertificateEntry(BaseModel):
+    """A certificate to include in the ITL file."""
+
+    pem: str = Field(..., description="PEM-encoded X.509 certificate")
+    roles: list[RoleType] = Field(..., min_length=1, description="Roles for this certificate")
+
+
+class SignerCredentials(BaseModel):
+    """Credentials for signing the ITL file."""
+
+    certificate_pem: str = Field(..., description="PEM-encoded signer certificate")
+    private_key_pem: str = Field(..., description="PEM-encoded signer private key")
+
+
+class ITLFileRequest(BaseModel):
+    """Request body for ITL file generation."""
+
+    certificates: list[ITLCertificateEntry] = Field(
+        ..., min_length=1, description="Certificates to include"
+    )
+    signer: SignerCredentials = Field(..., description="Signer credentials")
+
+
+# Config Encryption Schemas
+class EncryptConfigRequest(BaseModel):
+    """Request body for config encryption."""
+
+    device_name: Annotated[str, Field(pattern=r"^SEP[0-9A-F]{12}$")]
+    config_xml: str = Field(..., min_length=1, description="XML configuration to encrypt")
