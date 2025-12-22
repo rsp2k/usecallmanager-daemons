@@ -96,6 +96,23 @@ services:
           path: ./frontend/src
           target: /app/src
 
+  docs:
+    build:
+      context: ./docs
+      dockerfile: Dockerfile
+      target: ${MODE:-prod}
+    networks:
+      - caddy
+    labels:
+      caddy: docs.${DOMAIN:-localhost}
+      caddy.reverse_proxy: "{{upstreams 4321}}"
+    restart: unless-stopped
+    develop:
+      watch:
+        - action: sync+restart
+          path: ./docs/src
+          target: /app/src
+
 volumes:
   tvs-data:
   capf-data:
