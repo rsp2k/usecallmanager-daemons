@@ -5,15 +5,25 @@ interface Props {
   currentPath: string;
 }
 
+interface NavigationItem {
+  name: string;
+  href: string;
+  icon: string;
+  external?: boolean;
+}
+
 const { currentPath } = Astro.props;
 
-const navigation = [
+// Get docs URL from environment or use relative path for local development
+const docsUrl = import.meta.env.PUBLIC_DOCS_URL || 'https://docs.usecallmanager-services.l.supported.systems';
+
+const navigation: NavigationItem[] = [
   { name: 'Dashboard', href: '/', icon: 'lucide:layout-dashboard' },
   { name: 'Certificates', href: '/certificates', icon: 'lucide:shield-check' },
   { name: 'Devices', href: '/devices', icon: 'lucide:smartphone' },
   { name: 'Issuer Certificate', href: '/issuer-certificate', icon: 'lucide:award' },
   { name: 'Security Tools', href: '/security-tools', icon: 'lucide:lock' },
-  { name: 'Documentation', href: '/docs/index', icon: 'lucide:book-open' },
+  { name: 'Documentation', href: docsUrl, icon: 'lucide:book-open', external: true },
 ];
 
 function isActive(href: string): boolean {
@@ -36,6 +46,8 @@ function isActive(href: string): boolean {
       navigation.map((item) => (
         <a
           href={item.href}
+          target={item.external ? '_blank' : undefined}
+          rel={item.external ? 'noopener noreferrer' : undefined}
           class:list={[
             'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
             isActive(item.href)
@@ -45,6 +57,7 @@ function isActive(href: string): boolean {
         >
           <Icon name={item.icon} class="h-5 w-5" />
           {item.name}
+          {item.external && <Icon name="lucide:external-link" class="h-4 w-4 ml-auto opacity-50" />}
         </a>
       ))
     }
