@@ -1,0 +1,265 @@
+---
+title: Deploy with Docker Compose
+description: Deploy UseCallManager services using Docker Compose
+---
+
+import { Aside, Steps, Badge } from '@astrojs/starlight/components';
+
+## Prerequisites
+
+Before deploying, ensure you have:
+
+- Docker Engine <Badge text="20.10+" variant="tip" /> installed
+- Docker Compose V2
+- Git (to clone repository)
+- Basic command-line familiarity
+
+<Aside type="note">
+This guide assumes you're deploying on a Linux server. Commands may differ slightly on macOS or Windows.
+</Aside>
+
+## Deployment Steps
+
+<Steps>
+
+1. **Clone the Repository**
+
+   ```bash
+   git clone https://github.com/rsp2k/usecallmanager-daemons.git
+   cd usecallmanager-daemons
+   ```
+
+   This downloads the UseCallManager codebase to your server.
+
+2. **Create Environment Configuration**
+
+   Create a `.env` file in the project root:
+
+   ```bash
+   cat > .env <<'EOF'
+   # Project name (prevents namespace conflicts)
+   COMPOSE_PROJECT=usecallmanager
+
+   # Domain configuration (for HTTPS)
+   DOMAIN=usecallmanager.example.com
+   EOF
+   ```
+
+   **Replace `usecallmanager.example.com`** with your actual domain name.
+
+3. **Start All Services**
+
+   ```bash
+   docker compose up -d
+   ```
+
+   This command:
+   - Downloads required Docker images (first time only)
+   - Creates Docker volumes for persistent data
+   - Starts all services in the background
+
+   Expected output:
+   ```
+   [+] Running 5/5
+   ✔ Network usecallmanager_caddy        Created
+   ✔ Container usecallmanager-capf-1     Started
+   ✔ Container usecallmanager-tvs-1      Started
+   ✔ Container usecallmanager-frontend-1 Started
+   ✔ Container usecallmanager-docs-1     Started
+   ```
+
+4. **Verify Services are Running**
+
+   ```bash
+   docker compose ps
+   ```
+
+   All services should show **Status: Up**:
+   ```
+   NAME                          STATUS
+   usecallmanager-capf-1         Up (healthy)
+   usecallmanager-tvs-1          Up (healthy)
+   usecallmanager-frontend-1     Up
+   usecallmanager-docs-1         Up
+   ```
+
+5. **Check Service Health**
+
+   Test the health endpoints:
+
+   ```bash
+   # CAPF health
+   curl http://localhost:8082/api/v1/health
+
+   # TVS health
+   curl http://localhost:8081/api/v1/health
+   ```
+
+   Both should return:
+   ```json
+   {
+     "status": "healthy",
+     "version": "4.0.0",
+     "database": "connected"
+   }
+   ```
+
+6. **Access the Web Interface**
+
+   Open your browser to:
+   ```
+   http://localhost:4321
+   ```
+
+   You should see the UseCallManager dashboard.
+
+</Steps>
+
+## What Gets Deployed
+
+When you run `docker compose up -d`, four services start:
+
+### CAPF Service
+
+- **Protocol Port**: <Badge text="3804" variant="note" /> - Phones connect here for certificate enrollment
+- **API Port**: <Badge text="8082" variant="tip" /> - REST API for device management
+- **Purpose**: Issues LSC certificates to IP phones
+
+### TVS Service
+
+- **Protocol Port**: <Badge text="2445" variant="note" /> - Phones connect here for certificate validation
+- **API Port**: <Badge text="8081" variant="tip" /> - REST API for certificate management
+- **Purpose**: Validates server certificates for phones
+
+### Frontend Service
+
+- **Port**: <Badge text="4321" variant="tip" />
+- **Purpose**: Web UI dashboard for managing devices and certificates
+
+### Documentation Service
+
+- **Port**: <Badge text="4322" variant="tip" />
+- **Purpose**: This documentation site running locally
+
+## Default Port Mapping
+
+| Service | Protocol Port | API/Web Port |
+|---------|---------------|--------------|
+| CAPF | 3804 | 8082 |
+| TVS | 2445 | 8081 |
+| Frontend | - | 4321 |
+| Docs | - | 4322 |
+
+<Aside type="tip">
+If these ports conflict with existing services, see [Configure Environment](/how-to/installation/configure-environment/) to change them.
+</Aside>
+
+## Persistent Data Storage
+
+Docker volumes store all important data:
+
+```bash
+# List volumes
+docker volume ls | grep usecallmanager
+```
+
+Shows:
+```
+usecallmanager_capf-data      # CAPF database and certificates
+usecallmanager_tvs-data       # TVS database
+```
+
+**Important**: These volumes persist even if you remove containers. Data survives restarts and updates.
+
+## Updating Services
+
+To update to the latest version:
+
+```bash
+# Pull latest code
+git pull
+
+# Rebuild and restart
+docker compose up -d --build
+```
+
+This rebuilds images and restarts services while preserving data in volumes.
+
+## Stopping Services
+
+**Temporary stop** (preserves containers):
+```bash
+docker compose stop
+```
+
+**Complete shutdown** (removes containers, keeps volumes):
+```bash
+docker compose down
+```
+
+**Remove everything** (including volumes - **data loss!**):
+```bash
+docker compose down -v
+# ⚠️ WARNING: This deletes all certificates and device data!
+```
+
+## Troubleshooting
+
+### Services Won't Start
+
+Check Docker daemon is running:
+```bash
+sudo systemctl status docker
+```
+
+If stopped:
+```bash
+sudo systemctl start docker
+```
+
+### Port Already in Use
+
+Error: `bind: address already in use`
+
+Find what's using the port:
+```bash
+sudo lsof -i :3804  # Replace with conflicting port
+```
+
+Either:
+- Stop the conflicting service
+- Change ports in `.env` (see [Configure Environment](/how-to/installation/configure-environment/))
+
+### Permission Denied
+
+If you see permission errors:
+```bash
+# Add your user to docker group
+sudo usermod -aG docker $USER
+
+# Log out and back in for changes to take effect
+```
+
+### Health Checks Failing
+
+Check service logs:
+```bash
+docker compose logs capf
+docker compose logs tvs
+```
+
+Look for:
+- Database connection errors
+- Missing environment variables
+- Port binding failures
+
+## Next Steps
+
+After deployment:
+
+1. **Configure environment variables** - See [Configure Environment](/how-to/installation/configure-environment/)
+2. **Generate CAPF issuer certificate** - See [Generate Issuer Certificate](/how-to/certificates/generate-issuer/)
+3. **Upload server certificates to TVS** - See [Upload Certificates to TVS](/how-to/certificates/upload-to-tvs/)
+4. **Set up backups** - See [Backup & Restore](/how-to/installation/backup-restore/)
+
+For a complete walkthrough, see the [First Phone Deployment Tutorial](/tutorials/first-deployment/).

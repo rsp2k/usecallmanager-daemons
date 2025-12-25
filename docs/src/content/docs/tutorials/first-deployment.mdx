@@ -1,0 +1,311 @@
+---
+title: Your First Phone Deployment
+description: Learn to deploy a secure Cisco IP phone from scratch - step by step!
+sidebar:
+  order: 1
+---
+
+import { Card, CardGrid, Aside, Badge } from '@astrojs/starlight/components';
+
+# Your First Phone Deployment
+
+Welcome! In this tutorial, we'll deploy a Cisco IP phone with certificate security together. By the end, you'll have a working phone making secure calls.
+
+<Aside type="tip">
+**What we'll build:** A complete secure phone system with:
+- Certificate services running
+- A phone connected securely
+- Trust verification working
+- Everything you need for production
+
+**Time needed:** About 30 minutes
+</Aside>
+
+## What You'll Need
+
+Before we start, let's check you have everything:
+
+- ✅ A computer with Docker installed (<Badge text="20.10+" variant="tip" /> or newer)
+- ✅ A Cisco 7962G IP phone
+- ✅ Basic familiarity with terminal/command line
+- ✅ Network access to your phone
+
+<Aside type="note">
+Don't worry if you haven't used Docker much - we'll walk through every step together!
+</Aside>
+
+## Let's Get Started!
+
+### 1. Get the Code
+
+First, we'll download the UseCallManager code to your computer.
+
+Open your terminal and run:
+
+```bash
+git clone https://github.com/rsp2k/usecallmanager-daemons.git
+cd usecallmanager-daemons
+```
+
+**What just happened?** We downloaded all the code and moved into the project directory. You should see files like `docker-compose.yml` if you run `ls`.
+
+### 2. Start the Services
+
+Now let's start all the security services! This is where the magic happens.
+
+```bash
+docker compose up -d
+```
+
+You'll see Docker downloading images and starting containers. This takes a minute the first time.
+
+**Success indicators:**
+- ✅ You see "Creating" messages for each service
+- ✅ Final message shows "Started" for all services
+- ✅ No red error messages
+
+<Aside>
+**Pro tip:** The `-d` flag runs everything in the background so you can keep using your terminal!
+</Aside>
+
+### 3. Check Everything Started
+
+Let's verify our services are healthy. Run:
+
+```bash
+docker compose ps
+```
+
+You should see all services with "Up" status:
+- ✅ `capf` - Certificate service (Up)
+- ✅ `tvs` - Trust verification (Up)
+- ✅ `frontend` - Web interface (Up)
+- ✅ `docs` - Documentation (Up)
+
+**If anything shows "Exit":** Don't worry! Run `docker compose logs [service-name]` to see what happened.
+
+### 4. Open the Web Interface
+
+Now let's see the dashboard! Open your web browser and go to:
+
+```
+http://localhost:4321
+```
+
+**You should see:**
+- 📊 Dashboard with statistics
+- 🟢 Green indicators for service health
+- 📋 Quick actions buttons
+
+<Aside type="tip">
+**Celebrate!** 🎉 You've deployed the security services successfully! The hard part is done.
+</Aside>
+
+### 5. Generate the Certificate Authority
+
+Our phone needs a certificate to trust. Let's create the CA (Certificate Authority) that will sign certificates.
+
+1. In the web interface, click **"Setup Wizard"** in Quick Actions
+2. Follow the wizard to generate your CAPF issuer certificate
+3. Use these settings:
+   - **Common Name**: `CAPF-CA`
+   - **Organization**: Your company name
+   - **Country**: Your country code (e.g., `US`)
+   - **Key Type**: RSA 2048-bit
+   - **Validity**: 10 years
+
+4. Click **"Generate Certificate"**
+
+**What just happened?** We created the master certificate that will sign certificates for all your phones. This is like creating the "root of trust" for your phone system.
+
+### 6. Upload a Server Certificate
+
+Phones need to validate server certificates. Let's add your call manager's certificate to the trust list.
+
+**If you have a CallManager certificate:**
+
+1. Navigate to **Certificates** page
+2. Click **Upload Certificate**
+3. Select your CallManager certificate file
+4. Choose roles: `CCM` and `TFTP`
+5. Click **Upload**
+
+**For testing without a real CallManager:**
+
+We'll skip this for now - you can add it later when you have your CallManager ready!
+
+### 7. Configure Your First Phone
+
+Almost there! Now let's configure a phone to use these services.
+
+**Find your phone's MAC address:**
+- Press **Settings** button on the phone
+- Navigate to **Network Configuration**
+- Note the MAC address (example: `001122334455`)
+
+**Create the phone configuration:**
+
+1. Go to **Devices** page in the web UI
+2. Click **Add Device**
+3. Enter:
+   - **Device Name**: `SEP001122334455` (SEP + your MAC)
+   - **Operation**: Install
+   - **Authentication**: By Password
+   - **Password**: `SecurePass123!` (remember this!)
+   - **Key Size**: 2048
+
+4. Click **Save**
+
+**What we just did:** We told the CAPF service "a phone with this MAC address will connect, and it needs a certificate."
+
+### 8. Configure the Phone to Connect
+
+Now let's tell the phone where to find our services.
+
+**Create phone config file** (in your TFTP directory):
+
+File name: `SEP001122334455.cnf.xml`
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<device>
+  <deviceProtocol>SCCP</deviceProtocol>
+
+  <devicePool>
+    <!-- CAPF Configuration -->
+    <capf>
+      <serverName>YOUR_SERVER_IP</serverName>
+      <port>3804</port>
+      <timeout>10</timeout>
+      <autoUpgrade>true</autoUpgrade>
+    </capf>
+
+    <!-- TVS Configuration -->
+    <tvs>
+      <serverName>YOUR_SERVER_IP</serverName>
+      <port>2445</port>
+      <timeout>10</timeout>
+    </tvs>
+
+    <!-- Enable Security -->
+    <security>
+      <enabled>true</enabled>
+      <transportType>TLS</transportType>
+    </security>
+  </devicePool>
+
+  <phoneLabel>My First Secure Phone</phoneLabel>
+  <loadInformation>SCCP45.9-4-2SR3-1S</loadInformation>
+</device>
+```
+
+**Replace `YOUR_SERVER_IP`** with your computer's IP address.
+
+### 9. Watch the Phone Connect!
+
+This is the exciting part - let's watch the magic happen!
+
+1. **Reboot the phone** (or power it on if it's off)
+
+2. **Watch the phone display:**
+   - "Configuring IP..." ✓
+   - "Requesting configuration..." ✓
+   - "CAPF operation pending" ← This is where we need to act!
+
+3. **When prompted for authentication:**
+   - Phone shows: "Enter authentication string:"
+   - Enter: `SecurePass123!` (the password from step 7)
+   - Press **Submit** or `#`
+
+4. **Watch the enrollment:**
+   - "Contacting CAPF server..." ✓
+   - "Generating keys..." (this takes 30-60 seconds) ✓
+   - "Installing certificate..." ✓
+   - Phone reboots ✓
+
+5. **After reboot, look for:**
+   - 🔒 **Padlock icon** on the phone display
+   - This means: **Secure connection established!**
+
+### 10. Verify Success!
+
+Let's confirm everything worked perfectly.
+
+**In the web interface:**
+
+1. Go to **Devices** page
+2. Find your device `SEP001122334455`
+3. Check the device status:
+   - Operation should be "None" (enrollment completed)
+   - Certificate should show certificate data
+   - Status should show "Installed"
+
+**On the phone:**
+
+1. Press **Settings** → **Status** → **Security Configuration**
+2. Verify the security status:
+   - LSC Status should show "Installed"
+   - Security Mode should show "Encrypted"
+
+**In the audit logs:**
+
+1. Navigate to **Admin** → **CAPF Audit Logs**
+2. Look for these indicators:
+   - Recent enrollment entry
+   - Operation shows "enroll"
+   - Success is Yes
+   - Your phone's IP address appears
+
+## 🎉 Congratulations!
+
+**You did it!** You've successfully:
+
+✅ Deployed certificate security services
+✅ Created a Certificate Authority
+✅ Configured a phone for secure operation
+✅ Enrolled your first phone with an LSC certificate
+✅ Verified secure connections are working
+
+Your phone is now making encrypted calls using the certificate you just deployed!
+
+## What You Learned
+
+Through this hands-on tutorial, you've learned:
+
+- How to deploy UseCallManager services with Docker
+- How certificate enrollment works for IP phones
+- How to use the web interface to manage devices
+- How to verify secure connections are established
+
+## Next Steps
+
+Now that you have the basics working, you might want to:
+
+1. **Add more phones** - Use the same process for additional devices
+2. **Learn certificate management** - Try the [Certificate Security tutorial](/tutorials/certificate-security/)
+3. **Understand the architecture** - Read [Understanding CAPF](/explanation/understanding-capf/)
+4. **Explore troubleshooting** - Check out [Debug CAPF Issues](/how-to/troubleshooting/debug-capf/)
+
+## Troubleshooting
+
+**Phone doesn't prompt for authentication?**
+- Verify CAPF service is running: `docker compose ps capf`
+- Check the device is scheduled in web UI: Operation should be "Install"
+- Reboot the phone again
+
+**"Authentication failed" message?**
+- Make sure you typed the password exactly right
+- Check the password in the web UI matches what you entered
+- Try scheduling the operation again
+
+**Phone doesn't show padlock icon?**
+- Verify TVS service is running
+- Check that security is enabled in phone config (`<transportType>TLS</transportType>`)
+- Ensure CallManager certificate is uploaded to TVS
+
+**Need more help?**
+Check the [Troubleshooting guides](/how-to/troubleshooting/debug-capf/) for detailed solutions!
+
+---
+
+**Remember:** You built this! You went from nothing to a fully secure phone deployment. That's a real accomplishment! 🚀

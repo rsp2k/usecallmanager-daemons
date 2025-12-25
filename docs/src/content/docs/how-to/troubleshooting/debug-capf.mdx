@@ -1,0 +1,740 @@
+---
+title: Debug CAPF Enrollment
+description: Troubleshoot Certificate Authority Proxy Function enrollment issues
+---
+
+import { Aside, Steps, Badge } from '@astrojs/starlight/components';
+
+## Phone Shows "CAPF Connection Failed"
+
+<Aside type="caution">
+**Symptom**: Phone displays "CAPF Connection Failed" or "Unable to contact CAPF server" message when attempting certificate enrollment.
+</Aside>
+
+This indicates the phone cannot reach CAPF service over the network.
+
+### Diagnostic Steps
+
+<Steps>
+
+1. **Verify CAPF Service is Running**
+
+   ```bash
+   docker compose ps capf
+   ```
+
+   Expected output:
+   ```
+   NAME         SERVICE   STATUS
+   capf         capf      Up (healthy)
+   ```
+
+   If not running:
+   ```bash
+   docker compose up -d capf
+   docker compose logs capf --tail=100
+   ```
+
+2. **Check Network Connectivity**
+
+   From phone network, test CAPF port:
+   ```bash
+   # From a computer on the phone VLAN
+   nc -zv capf.example.com 3804
+   ```
+
+   Or use openssl:
+   ```bash
+   openssl s_client -connect capf.example.com:3804 -showcerts
+   ```
+
+   Should see successful TLS handshake.
+
+3. **Verify Phone Configuration**
+
+   Check phone's config file has correct CAPF settings:
+   - File: `SEP<MAC-ADDRESS>.cnf.xml` on TFTP server
+   - Should contain:
+     ```xml
+     <capf>
+       <serverName>capf.example.com</serverName>
+       <port>3804</port>
+       <timeout>10</timeout>
+     </capf>
+     ```
+
+4. **Check Firewall Rules**
+
+   Verify firewall allows phones to reach port 3804:
+   ```bash
+   sudo iptables -L -n | grep 3804
+   ```
+
+5. **Review CAPF Logs**
+
+   ```bash
+   docker compose logs capf --tail=50
+   ```
+
+   Look for connection attempts from phone's IP address.
+
+</Steps>
+
+### Solutions
+
+**Problem: CAPF service not running**
+```bash
+docker compose up -d capf
+# Wait for service to start
+docker compose ps capf
+```
+
+**Problem: Firewall blocking port 3804**
+```bash
+# Add rule allowing phones to reach CAPF
+sudo iptables -A INPUT -p tcp --dport 3804 -s 10.0.100.0/24 -j ACCEPT
+```
+
+**Problem: Wrong CAPF hostname in phone config**
+
+Edit `SEP<MAC>.cnf.xml`:
+```xml
+<capf>
+  <serverName>CORRECT-CAPF-HOSTNAME</serverName>
+  <port>3804</port>
+</capf>
+```
+
+Reboot phone to reload configuration.
+
+**Problem: DNS resolution failing**
+
+Test DNS from phone network:
+```bash
+nslookup capf.example.com
+```
+
+If failing:
+- Use IP address instead of hostname in phone config
+- Fix DNS server configuration
+- Add entry to phone VLAN DNS server
+
+## Phone Shows "Authentication Failed"
+
+<Aside type="caution">
+**Symptom**: Phone connects to CAPF but displays "Authentication Failed" or "Invalid Credentials" during enrollment.
+</Aside>
+
+The phone reached CAPF but couldn't prove its identity.
+
+### Diagnostic Steps
+
+<Steps>
+
+1. **Verify Device is Scheduled**
+
+   Via Web UI:
+   - Navigate to **Devices** page
+   - Search for device name (e.g., `SEP001122334455`)
+   - Check **Operation** column
+
+   Via API:
+   ```bash
+   curl https://your-domain.com/api/capf/api/v1/devices/SEP001122334455
+   ```
+
+   Should show:
+   ```json
+   {
+     "device_name": "SEP001122334455",
+     "operation": "install",  // Must NOT be "none"
+     "authentication": "by password",
+     "password": "SecurePass123"
+   }
+   ```
+
+2. **Check Authentication Mode**
+
+   Verify authentication mode matches phone's capabilities:
+   - **By Password**: Most secure, requires user input
+   - **By Null String**: Empty password
+   - **No Password**: Device name only
+
+3. **Review CAPF Audit Logs**
+
+   Web UI:
+   - Navigate to **Admin** → **CAPF Audit Logs**
+   - Filter by device name
+   - Look for authentication failure entries
+
+   Shows:
+   - Timestamp of attempt
+   - Client IP (should match phone)
+   - Error: "Authentication failed"
+
+4. **Verify Password (if using "by password" mode)**
+
+   Common issues:
+   - Password typed incorrectly on phone
+   - Password in database doesn't match
+   - Special characters causing input problems
+
+</Steps>
+
+### Solutions
+
+**Problem: No operation scheduled**
+
+Schedule enrollment via Web UI:
+1. Go to **Devices** → **Add Device**
+2. Enter device name: `SEP001122334455`
+3. Select operation: **Install**
+4. Choose authentication: **By Password**
+5. Enter password: `SecurePass123`
+6. Set key size: **2048**
+7. Click **Save**
+
+Via API:
+```bash
+curl -X POST https://your-domain.com/api/capf/api/v1/devices \
+  -H "Content-Type: application/json" \
+  -d '{
+    "device_name": "SEP001122334455",
+    "operation": "install",
+    "authentication": "by password",
+    "password": "SecurePass123",
+    "key_size": 2048
+  }'
+```
+
+**Problem: Wrong password entered on phone**
+
+1. Double-check password in Web UI
+2. Re-enter password carefully on phone:
+   - Use phone keypad
+   - Watch for special characters
+   - Press **Submit** or `#` when done
+3. If still failing, change to simpler password temporarily
+
+**Problem: Authentication mode mismatch**
+
+If phone expects password but database shows "no password":
+```bash
+# Update device authentication mode
+curl -X PATCH https://your-domain.com/api/capf/api/v1/devices/SEP001122334455 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "authentication": "by password",
+    "password": "SecurePass123"
+  }'
+```
+
+**Problem: Device name mismatch**
+
+Phone sends device name `SEP001122334455` but database has `sep001122334455` (wrong case):
+- Device names are case-sensitive
+- Must match exactly: `SEP` prefix, uppercase hex MAC
+- Update database with correct device name
+
+## Enrollment Succeeds But Phone Still Insecure
+
+<Aside type="caution">
+**Symptom**: CAPF logs show successful enrollment, but phone doesn't show padlock icon or secure connection indicator.
+</Aside>
+
+The certificate installed but phone isn't using it for secure connections.
+
+### Diagnostic Steps
+
+<Steps>
+
+1. **Verify Certificate Installation on Phone**
+
+   On phone:
+   - Press **Settings** → **Security Configuration** → **LSC**
+   - Should show: **Installed**
+
+   If shows **Not Installed**, enrollment didn't complete properly.
+
+2. **Check Phone Security Configuration**
+
+   Phone config must enable security:
+   ```xml
+   <security>
+     <enabled>true</enabled>
+     <transportType>TLS</transportType>
+   </security>
+   ```
+
+3. **Verify CallManager TLS Configuration**
+
+   CallManager must:
+   - Accept TLS connections (port 2443)
+   - Present valid certificate
+   - Have certificate uploaded to TVS
+
+4. **Check TVS Validation**
+
+   Phone needs to validate CallManager's certificate via TVS:
+   ```bash
+   # Verify CallManager cert is in TVS
+   curl https://your-tvs.example.com/api/tvs/api/v1/certificates
+   ```
+
+   Look for CallManager certificate with role `CCM`.
+
+5. **Review Phone Display**
+
+   Check for security indicators:
+   - **🔒 Locked Padlock**: Secure connection active
+   - **🔓 Unlocked Padlock**: Connected but not secure
+   - **❌ No Icon**: Security not configured
+
+</Steps>
+
+### Solutions
+
+**Problem: Security not enabled in phone config**
+
+Edit `SEP<MAC>.cnf.xml`:
+```xml
+<security>
+  <enabled>true</enabled>
+  <transportType>TLS</transportType>
+</security>
+
+<!-- Also ensure secure port is configured -->
+<callManager>
+  <ports>
+    <ethernetPhonePort>2000</ethernetPhonePort>
+    <secureEthernetPhonePort>2443</secureEthernetPhonePort>
+  </ports>
+</callManager>
+```
+
+Reboot phone to apply changes.
+
+**Problem: CallManager certificate not in TVS**
+
+<Steps>
+
+1. Extract CallManager certificate:
+   ```bash
+   openssl s_client -connect cucm.example.com:443 \
+     -showcerts </dev/null 2>/dev/null | \
+     openssl x509 -outform PEM > cucm-cert.pem
+   ```
+
+2. Upload to TVS:
+   - Via Web UI: **Certificates** → **Upload** → select file → roles: `CCM`, `TFTP`
+   - Via API:
+     ```bash
+     curl -X POST https://your-tvs.example.com/api/tvs/api/v1/certificates \
+       -F "certificate=@cucm-cert.pem" \
+       -F "roles=CCM,TFTP"
+     ```
+
+3. Reboot phone to clear TVS cache
+
+</Steps>
+
+**Problem: Phone using MIC instead of LSC**
+
+Force phone to use LSC:
+1. **Settings** → **Security Configuration** → **LSC**
+2. Select **Trust LSC**
+3. Phone reboots and uses LSC for authentication
+
+**Problem: CallManager not accepting TLS**
+
+Check CallManager configuration:
+- Ensure TLS service is running
+- Verify port 2443 is listening
+- Check CallManager certificate is valid
+- Review CallManager logs for TLS errors
+
+## Certificate Generation Hangs or Times Out
+
+<Aside type="caution">
+**Symptom**: Phone shows "Generating keys..." for extended period (5+ minutes), then times out or errors.
+</Aside>
+
+Key generation is taking too long or failing.
+
+### Diagnostic Steps
+
+<Steps>
+
+1. **Check Key Size Setting**
+
+   Large key sizes take longer to generate:
+   - RSA-1024: 10-15 seconds
+   - RSA-2048: 30-60 seconds ← Normal
+   - RSA-3072: 2-5 minutes (not supported on 7962G)
+   - RSA-4096: 5-10 minutes (not supported on 7962G)
+
+2. **Verify Phone Firmware**
+
+   Older firmware may be slower or have bugs:
+   ```
+   # Check firmware on phone
+   Settings → Model Information → Load Information
+   ```
+
+   For Cisco 7962G:
+   - Minimum: SCCP 8.4(1) or SIP 9.0(1)
+   - Recommended: SCCP 9.4(2)+ or SIP 9.x latest
+
+3. **Review CAPF Configuration**
+
+   Check scheduled key parameters:
+   ```bash
+   curl https://your-domain.com/api/capf/api/v1/devices/SEP001122334455
+   ```
+
+   Look at:
+   - `key_size`: Should be 2048 for 7962G
+   - `key_type`: Should be `rsa` for 7962G
+
+</Steps>
+
+### Solutions
+
+**Problem: Key size too large**
+
+Reduce key size to 2048 (maximum for Cisco 7962G):
+```bash
+curl -X PATCH https://your-domain.com/api/capf/api/v1/devices/SEP001122334455 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "key_size": 2048,
+    "key_type": "rsa"
+  }'
+```
+
+**Problem: Phone hardware issue**
+
+Test with another phone:
+- Schedule different phone for enrollment
+- If that works, original phone may have hardware issue
+- Try factory reset on problematic phone
+
+**Problem: Network interruption during generation**
+
+Key generation happens on phone (not interrupted by network), but:
+- Ensure stable network connection
+- Increase timeout in phone config:
+  ```xml
+  <capf>
+    <timeout>30</timeout>  <!-- Increase from 10 -->
+  </capf>
+  ```
+
+**Problem: Firmware bug**
+
+Upgrade phone firmware:
+1. Download latest SCCP firmware for 7962G
+2. Place on TFTP server
+3. Update phone config:
+   ```xml
+   <loadInformation>SCCP45.9-4-2SR3-1S</loadInformation>
+   ```
+4. Reboot phone to trigger upgrade
+
+## Multiple Enrollment Failures in Audit Log
+
+<Aside type="caution">
+**Symptom**: CAPF audit log shows repeated failed enrollment attempts from same or multiple phones.
+</Aside>
+
+This could indicate configuration issues or an attack.
+
+### Diagnostic Steps
+
+<Steps>
+
+1. **Review Audit Log Patterns**
+
+   ```bash
+   # Check recent failures
+   curl https://your-domain.com/api/capf/api/v1/audit-logs?operation=enroll&success=false&limit=50
+   ```
+
+   Look for:
+   - Same IP address repeatedly failing (likely config issue)
+   - Multiple IPs with same device name (possible attack)
+   - Authentication failures vs other errors
+
+2. **Check IP Addresses**
+
+   Verify failing IP addresses are in phone subnet:
+   ```bash
+   # Known phone subnet: 10.0.100.0/24
+   # Failing IP: 192.168.1.50
+   # → Suspicious, not from phone network
+   ```
+
+3. **Examine Failure Reasons**
+
+   Common error messages:
+   - "Authentication failed" - Wrong password or no operation scheduled
+   - "No pending operation" - Device not scheduled in database
+   - "CSR invalid" - Phone sent malformed CSR
+   - "Connection timeout" - Network interruption
+
+</Steps>
+
+### Solutions
+
+**Problem: Configuration error affecting multiple phones**
+
+Common config mistakes:
+1. All phones pointing to wrong CAPF server
+2. Missing `<capf>` section in phone configs
+3. Wrong authentication mode set
+
+Fix:
+- Review phone config template
+- Regenerate configs with correct CAPF settings
+- Deploy updated configs via TFTP
+
+**Problem: Possible attack**
+
+If you see:
+- Enrollment attempts from unknown IPs
+- Same device name from multiple IPs
+- Attempts outside business hours
+
+Response:
+```bash
+# Block suspicious IP
+sudo iptables -A INPUT -p tcp --dport 3804 -s 192.168.1.50 -j DROP
+
+# Review all recent attempts
+docker compose logs capf --tail=500 | grep "192.168.1.50"
+
+# Consider implementing rate limiting
+```
+
+**Problem: Misconfigured device records**
+
+Bulk fix device records:
+1. Export current device list
+2. Review for errors (wrong operation, invalid passwords)
+3. Delete incorrect entries:
+   ```bash
+   curl -X DELETE https://your-domain.com/api/capf/api/v1/devices/SEP999999999999
+   ```
+4. Re-create with correct settings
+
+## Certificate Expired
+
+<Aside type="caution">
+**Symptom**: Phone shows security warnings, TLS connections fail, or phone can't register with CallManager after working fine for months/years.
+</Aside>
+
+The LSC certificate has reached its expiration date.
+
+### Diagnostic Steps
+
+<Steps>
+
+1. **Check Certificate Expiration**
+
+   Via Web UI:
+   - Navigate to **Devices** page
+   - Find device
+   - Check **Not Valid After** column
+
+   Via API:
+   ```bash
+   curl https://your-domain.com/api/capf/api/v1/devices/SEP001122334455
+   ```
+
+   Look at `not_valid_after` field:
+   ```json
+   {
+     "not_valid_after": 1640995200  // Unix timestamp
+   }
+   ```
+
+   Convert timestamp:
+   ```bash
+   date -d @1640995200
+   # Output: Fri Dec 31 23:59:59 UTC 2021
+   ```
+
+2. **Check Phone Certificate Status**
+
+   On phone:
+   - **Settings** → **Status** → **Security Configuration**
+   - Look for expiration date
+
+3. **Review Recent Changes**
+
+   Did anything change:
+   - System clock on CAPF server
+   - Phone clock settings
+   - Certificate was manually replaced
+
+</Steps>
+
+### Solutions
+
+**Problem: Certificate naturally expired**
+
+Re-enroll phone with new certificate:
+```bash
+# Schedule new installation
+curl -X POST https://your-domain.com/api/capf/api/v1/devices \
+  -H "Content-Type: application/json" \
+  -d '{
+    "device_name": "SEP001122334455",
+    "operation": "install",
+    "authentication": "by password",
+    "password": "SecurePass123",
+    "key_size": 2048,
+    "validity_days": 365
+  }'
+```
+
+On phone:
+- **Settings** → **Security Configuration** → **LSC** → **Update**
+- Enter authentication password
+- Wait for enrollment to complete
+
+**Problem: Certificates expiring frequently**
+
+Set longer validity period:
+```bash
+# Update default validity to 2 years
+export CAPF_VALIDITY_DAYS=730
+
+# Or set per-device
+curl -X PATCH https://your-domain.com/api/capf/api/v1/devices/SEP001122334455 \
+  -d '{"validity_days": 730}'
+```
+
+**Problem: Need to track upcoming expirations**
+
+Set up monitoring:
+```bash
+#!/bin/bash
+# Check for certificates expiring in next 30 days
+
+curl -s https://your-domain.com/api/capf/api/v1/devices | \
+  jq -r '.[] | select(.not_valid_after < (now + (30 * 86400))) |
+    "\(.device_name) expires \(.not_valid_after | strftime("%Y-%m-%d"))"'
+```
+
+Schedule this script to run daily and alert administrators.
+
+## Proactive Monitoring
+
+### Health Check Script
+
+```bash
+#!/bin/bash
+# capf-health-check.sh
+
+# Check service running
+if ! docker compose ps capf | grep -q "Up"; then
+  echo "CRITICAL: CAPF service down"
+  exit 2
+fi
+
+# Check port listening
+if ! nc -zv localhost 3804 2>&1 | grep -q "succeeded"; then
+  echo "CRITICAL: CAPF port 3804 not responding"
+  exit 2
+fi
+
+# Check for recent failures
+failures=$(curl -s http://localhost:8082/api/v1/audit-logs?operation=enroll&success=false&limit=10 | jq length)
+if [ "$failures" -gt 5 ]; then
+  echo "WARNING: $failures recent enrollment failures"
+  exit 1
+fi
+
+# Check certificates expiring soon
+expiring=$(docker compose exec -T capf sqlite3 /var/lib/capf/capf.sqlite3 \
+  "SELECT COUNT(*) FROM devices WHERE not_valid_after < strftime('%s', 'now', '+30 days');")
+if [ "$expiring" -gt 0 ]; then
+  echo "WARNING: $expiring certificates expire within 30 days"
+  exit 1
+fi
+
+echo "OK: CAPF healthy, no immediate issues"
+exit 0
+```
+
+### Audit Log Review
+
+Regular audit log analysis:
+```bash
+# Top failing devices
+curl -s https://your-domain.com/api/capf/api/v1/audit-logs?success=false&limit=100 | \
+  jq -r '.[].resource_id' | sort | uniq -c | sort -rn | head -10
+
+# Enrollment success rate (last 24 hours)
+total=$(curl -s https://your-domain.com/api/capf/api/v1/audit-logs?operation=enroll | jq length)
+failed=$(curl -s https://your-domain.com/api/capf/api/v1/audit-logs?operation=enroll&success=false | jq length)
+success_rate=$(echo "scale=2; ($total - $failed) / $total * 100" | bc)
+echo "Success rate: $success_rate%"
+```
+
+### Certificate Lifecycle Management
+
+Automated renewal before expiration:
+```bash
+#!/bin/bash
+# auto-renew-expiring.sh
+
+# Find devices with certificates expiring in 30 days
+expiring_devices=$(curl -s https://your-domain.com/api/capf/api/v1/devices | \
+  jq -r '.[] | select(.not_valid_after < (now + (30 * 86400))) | .device_name')
+
+for device in $expiring_devices; do
+  echo "Scheduling renewal for $device"
+
+  curl -X PATCH https://your-domain.com/api/capf/api/v1/devices/$device/operation \
+    -H "Content-Type: application/json" \
+    -d '{
+      "operation": "install"
+    }'
+done
+```
+
+Run weekly via cron to catch upcoming expirations.
+
+## Getting More Help
+
+If you've tried all troubleshooting steps and still have issues:
+
+1. **Collect diagnostic information:**
+   ```bash
+   # CAPF logs
+   docker compose logs capf --tail=500 > capf-logs.txt
+
+   # Device database export
+   docker compose exec capf sqlite3 /var/lib/capf/capf.sqlite3 \
+     ".dump devices" > devices.sql
+
+   # Audit logs
+   curl https://your-domain.com/api/capf/api/v1/audit-logs?limit=100 > audit.json
+
+   # Phone config (sanitized)
+   cat SEP<MAC>.cnf.xml > phone-config.xml
+   ```
+
+2. **Document the timeline:**
+   - When did enrollment last work?
+   - What changed since then?
+   - Is this affecting one phone or many?
+
+3. **Check related systems:**
+   - Is TVS working? (see [Debug TVS Issues](/how-to/troubleshooting/debug-tvs/))
+   - Is CallManager reachable?
+   - Are phone configs being delivered via TFTP?
+
+Then consult [Understanding CAPF](/explanation/understanding-capf/) for conceptual insights or [CAPF Protocol Specification](/reference/protocol/capf/) for technical details.

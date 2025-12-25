@@ -1,0 +1,572 @@
+---
+title: Enroll Phone with LSC
+description: Enroll a Cisco IP phone with a Locally Significant Certificate
+---
+
+import { Aside, Steps, Badge } from '@astrojs/starlight/components';
+
+## What is LSC Enrollment?
+
+LSC (Locally Significant Certificate) enrollment is the process of giving a phone its own unique cryptographic identity certificate. This certificate enables the phone to:
+
+- Authenticate to CallManager securely
+- Encrypt signaling (TLS) and media (SRTP)
+- Prove its identity to the network
+
+<Aside type="tip">
+LSC enrollment replaces the factory-installed MIC (Manufacturer Installed Certificate) with a locally-controlled certificate that you can manage and revoke.
+</Aside>
+
+## Prerequisites
+
+Before enrolling a phone:
+
+- ✅ CAPF service running
+- ✅ CAPF issuer certificate generated (see [Generate Issuer Certificate](/how-to/certificates/generate-issuer/))
+- ✅ Phone accessible on network
+- ✅ Phone configuration file deployed via TFTP
+- ✅ Phone's MAC address known
+
+## Enrollment Methods
+
+You can enroll phones manually (one at a time) or automatically (bulk operations).
+
+### Method 1: Manual Enrollment via Web UI
+
+Best for: Initial testing, individual phones, troubleshooting
+
+<Steps>
+
+1. **Access Web Interface**
+
+   Navigate to your UseCallManager instance:
+   ```
+   http://localhost:4321
+   ```
+
+2. **Navigate to Devices Page**
+
+   Click **Devices** in the sidebar navigation.
+
+3. **Add New Device**
+
+   Click **Add Device** button.
+
+4. **Enter Device Information**
+
+   Fill in the form:
+
+   **Device Name:**
+   - Format: `SEP` + 12-digit MAC address
+   - Example: `SEP001122334455`
+   - Must match phone's actual MAC address
+
+   **Operation:**
+   - Select **Install**
+   - This schedules certificate generation and installation
+
+   **Authentication Mode:**
+   - **By Password** (recommended) - User enters password on phone
+   - **By Null String** - Empty password
+   - **No Password** - Device name only (insecure)
+
+   **Password** (if using "By Password"):
+   - Enter a strong password
+   - User will need to enter this on the phone
+   - Example: `SecureEnroll2024!`
+
+   **Key Size:**
+   - **2048** (recommended for Cisco 7962G)
+   - Options: 1024, 2048, 3072, 4096
+
+   **Validity Days:**
+   - Default: 365 (1 year)
+   - Range: 1-3650 days
+
+5. **Click Save**
+
+   Device is now scheduled for enrollment.
+
+6. **Trigger Enrollment on Phone**
+
+   On the Cisco 7962G phone:
+
+   **Option A - Via Menu:**
+   - Press **Settings** button
+   - Navigate to **Security Configuration**
+   - Select **LSC**
+   - Choose **Update**
+   - Phone prompts: "Enter Authentication String"
+   - Enter the password you set: `SecureEnroll2024!`
+   - Press **Submit** or `#`
+
+   **Option B - Via Keycode:**
+   - Pick up handset
+   - Dial: `**#` (keycode for LSC enrollment)
+   - Enter password when prompted
+   - Press `#` to submit
+
+7. **Monitor Progress**
+
+   Phone displays status messages:
+   - "Contacting CAPF server..." (connecting)
+   - "Generating keys..." (30-60 seconds for RSA-2048)
+   - "Requesting certificate..." (sending CSR)
+   - "Installing certificate..." (saving certificate)
+   - "Success - Rebooting" (enrollment complete)
+
+   <Aside type="note">
+   Key generation takes 30-60 seconds on Cisco 7962G. This is normal - don't interrupt the process!
+   </Aside>
+
+8. **Verify Successful Enrollment**
+
+   After phone reboots:
+
+   **On Phone:**
+   - Press **Settings** → **Status** → **Security Configuration**
+   - Check **LSC Status**: Should show "Installed"
+   - Check **Security Mode**: Should show "Encrypted" (if TLS enabled)
+
+   **In Web UI:**
+   - Navigate to **Devices** page
+   - Find device `SEP001122334455`
+   - **Operation** column should show "None" (enrollment complete)
+   - **Certificate** column should show certificate data
+   - **Expires** column shows expiration date
+
+   **Via API:**
+   ```bash
+   curl http://localhost:8082/api/v1/devices/SEP001122334455 | \
+     jq '{operation: .operation, has_cert: (.certificate != null), expires: (.not_valid_after | strftime("%Y-%m-%d"))}'
+   ```
+
+</Steps>
+
+### Method 2: API-Based Enrollment
+
+Best for: Automation, bulk operations, integration with provisioning systems
+
+<Steps>
+
+1. **Schedule Device for Enrollment**
+
+   ```bash
+   curl -X POST http://localhost:8082/api/v1/devices \
+     -H "Content-Type: application/json" \
+     -d '{
+       "device_name": "SEP001122334455",
+       "operation": "install",
+       "authentication": "by password",
+       "password": "SecureEnroll2024!",
+       "key_size": 2048,
+       "validity_days": 365
+     }'
+   ```
+
+   **Response:**
+   ```json
+   {
+     "device_name": "SEP001122334455",
+     "operation": "install",
+     "authentication": "by password",
+     "key_size": 2048,
+     "validity_days": 365,
+     "created_at": 1609459200
+   }
+   ```
+
+2. **Perform Enrollment on Phone**
+
+   Same as manual method - phone user triggers enrollment and enters password.
+
+3. **Verify Enrollment Completed**
+
+   ```bash
+   curl http://localhost:8082/api/v1/devices/SEP001122334455
+   ```
+
+   Look for:
+   - `"operation": "none"` (enrollment complete)
+   - `"certificate": "-----BEGIN CERTIFICATE-----..."` (certificate installed)
+   - `"not_valid_after": <timestamp>` (expiration date set)
+
+</Steps>
+
+### Method 3: Bulk Enrollment
+
+Best for: Deploying many phones at once
+
+<Steps>
+
+1. **Prepare Device List**
+
+   Create a file with device MAC addresses:
+   ```bash
+   cat > devices.txt <<EOF
+   SEP001122334455
+   SEP665544332211
+   SEP998877665544
+   SEPAABBCCDDEEFF
+   EOF
+   ```
+
+2. **Bulk Schedule Enrollment**
+
+   ```bash
+   # Shared password for all devices in batch
+   PASSWORD="BulkEnroll2024!"
+
+   while read device; do
+     echo "Scheduling enrollment for $device"
+
+     curl -X POST http://localhost:8082/api/v1/devices \
+       -H "Content-Type: application/json" \
+       -d "{
+         \"device_name\": \"$device\",
+         \"operation\": \"install\",
+         \"authentication\": \"by password\",
+         \"password\": \"$PASSWORD\",
+         \"key_size\": 2048,
+         \"validity_days\": 365
+       }"
+
+     echo ""
+   done < devices.txt
+   ```
+
+3. **Notify Users**
+
+   Send email to phone users with:
+   - Enrollment password: `BulkEnroll2024!`
+   - Instructions for triggering enrollment
+   - Expected timeline
+
+4. **Monitor Progress**
+
+   Track enrollment completion:
+   ```bash
+   # Check pending operations
+   curl -s http://localhost:8082/api/v1/devices | \
+     jq '[.[] | select(.operation == "install")] | length'
+   ```
+
+   Shows count of devices still waiting for enrollment.
+
+   **Review audit logs:**
+   ```bash
+   curl -s http://localhost:8082/api/v1/audit-logs?operation=enroll | \
+     jq '.[] | {device: .resource_id, success: .success, time: (.timestamp | strftime("%Y-%m-%d %H:%M"))}'
+   ```
+
+5. **Handle Stragglers**
+
+   After 24-48 hours, identify phones that haven't enrolled:
+   ```bash
+   curl -s http://localhost:8082/api/v1/devices | \
+     jq -r '.[] | select(.operation == "install") | .device_name'
+   ```
+
+   Contact users for manual enrollment or investigate connectivity issues.
+
+</Steps>
+
+## Phone Configuration Requirements
+
+For enrollment to work, the phone must have proper configuration.
+
+### Phone Config File
+
+The phone's configuration file (`SEP<MAC>.cnf.xml`) must include:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<device>
+  <devicePool>
+    <!-- CAPF Configuration - REQUIRED -->
+    <capf>
+      <serverName>capf.example.com</serverName>
+      <port>3804</port>
+      <timeout>10</timeout>
+      <autoUpgrade>true</autoUpgrade>
+    </capf>
+
+    <!-- TVS Configuration - for certificate validation -->
+    <tvs>
+      <serverName>tvs.example.com</serverName>
+      <port>2445</port>
+      <timeout>10</timeout>
+    </tvs>
+
+    <!-- Enable Security -->
+    <security>
+      <enabled>true</enabled>
+      <transportType>TLS</transportType>
+    </security>
+
+    <!-- CallManager with secure port -->
+    <callManagerGroup>
+      <members>
+        <member priority="0">
+          <callManager>
+            <ports>
+              <ethernetPhonePort>2000</ethernetPhonePort>
+              <secureEthernetPhonePort>2443</secureEthernetPhonePort>
+            </ports>
+            <processNodeName>cucm.example.com</processNodeName>
+          </callManager>
+        </member>
+      </members>
+    </callManagerGroup>
+  </devicePool>
+
+  <!-- Device Information -->
+  <phoneLabel>Reception Desk</phoneLabel>
+  <loadInformation>SCCP45.9-4-2SR3-1S</loadInformation>
+</device>
+```
+
+**Key elements:**
+- `<capf>` section with correct server and port
+- `<security><enabled>true</enabled>` to enable TLS
+- `<secureEthernetPhonePort>` for encrypted CallManager connection
+
+### Firmware Requirements
+
+**Cisco 7962G:**
+- **SCCP**: Version 8.4(1) or later (recommended: 9.4(2)+)
+- **SIP**: Version 9.0(1) or later
+
+Check phone firmware:
+- Press **Settings** → **Model Information** → **Load Information**
+
+If firmware too old, upgrade before enrolling.
+
+## Enrollment Scenarios
+
+### Scenario 1: First-Time Phone Deployment
+
+New phone, never enrolled before:
+
+<Steps>
+
+1. Connect phone to network
+2. Deploy phone config via TFTP
+3. Phone boots and registers with CallManager (using MIC)
+4. Schedule LSC enrollment in CAPF
+5. Trigger enrollment on phone (user enters password)
+6. Phone re-registers using LSC
+7. Verify secure connection (padlock icon)
+
+</Steps>
+
+### Scenario 2: MIC to LSC Migration
+
+Existing phone using MIC, migrating to LSC:
+
+<Steps>
+
+1. Phone currently operational with MIC
+2. Schedule enrollment in CAPF
+3. User triggers enrollment (password required)
+4. Phone generates keys and receives LSC
+5. Phone reboots with LSC
+6. Verify LSC active: **Settings** → **Security Configuration**
+
+</Steps>
+
+**During migration**, phone briefly disconnects (~2-3 minutes). Schedule during low-usage periods.
+
+### Scenario 3: Certificate Renewal
+
+LSC expiring, needs renewal:
+
+<Steps>
+
+1. Identify expiring certificate (see [Renew Certificates](/how-to/certificates/renew-certificates/))
+2. Schedule "install" operation (same as initial enrollment)
+3. User triggers enrollment
+4. New certificate generated with fresh expiration date
+5. Phone continues operation with renewed certificate
+
+</Steps>
+
+**No downtime** - phone seamlessly transitions to new certificate.
+
+### Scenario 4: Phone Replacement
+
+Old phone failed, replacing with new phone but keeping same device name:
+
+**Option A: Fetch (if private key backed up)**
+```bash
+curl -X POST http://localhost:8082/api/v1/devices \
+  -d '{"device_name": "SEP001122334455", "operation": "fetch"}'
+```
+
+Replacement phone retrieves existing certificate.
+
+**Option B: Install (recommended)**
+```bash
+curl -X POST http://localhost:8082/api/v1/devices \
+  -d '{"device_name": "SEP001122334455", "operation": "install"}'
+```
+
+Generate fresh certificate for replacement phone.
+
+## Troubleshooting Enrollment
+
+### Phone Shows "CAPF Connection Failed"
+
+**Problem**: Phone cannot reach CAPF service.
+
+**Solutions**: See [Debug CAPF Enrollment](/how-to/troubleshooting/debug-capf/) for detailed troubleshooting.
+
+**Quick checks:**
+```bash
+# Verify CAPF running
+docker compose ps capf
+
+# Test CAPF port from phone network
+nc -zv capf.example.com 3804
+
+# Check phone config has CAPF settings
+```
+
+### Phone Shows "Authentication Failed"
+
+**Problem**: Password incorrect or device not scheduled.
+
+**Solutions:**
+
+<Steps>
+
+1. **Verify device scheduled**
+
+   ```bash
+   curl http://localhost:8082/api/v1/devices/SEP001122334455 | \
+     jq '{operation: .operation, auth: .authentication}'
+   ```
+
+   Should show `"operation": "install"`
+
+2. **Check password**
+
+   Ensure password in CAPF matches what user entered.
+
+3. **Re-enter password carefully**
+
+   Special characters can be tricky on phone keypad.
+
+4. **Review audit logs**
+
+   ```bash
+   curl http://localhost:8082/api/v1/audit-logs?operation=enroll | \
+     jq '.[] | select(.resource_id == "SEP001122334455")'
+   ```
+
+</Steps>
+
+### Key Generation Hangs
+
+**Problem**: Phone stuck at "Generating keys..." for 5+ minutes.
+
+**Solutions:**
+
+- **RSA-2048**: Normal to take 30-60 seconds on 7962G
+- **If >5 minutes**: Reboot phone and retry
+- **Check key size**: Ensure not set to 3072 or 4096 (not supported)
+- **Firmware**: Upgrade to latest for faster key generation
+
+### Enrollment Succeeds But No Secure Connection
+
+**Problem**: LSC installed but phone doesn't show padlock icon.
+
+**Solutions**: See complete guide at [Debug CAPF Enrollment](/how-to/troubleshooting/debug-capf/)
+
+**Quick checks:**
+- Verify security enabled in phone config (`<enabled>true</enabled>`)
+- Check CallManager certificate uploaded to TVS
+- Ensure CallManager accepting TLS connections (port 2443)
+- Review TVS audit logs for validation attempts
+
+## Post-Enrollment Verification
+
+### Check Phone Status
+
+**On Phone:**
+- **Settings** → **Status** → **Security Configuration**
+- Look for:
+  - **LSC Status**: Installed
+  - **Security Mode**: Encrypted
+  - **Trust List**: Updated
+
+**Visual Indicator:**
+- 🔒 **Locked padlock icon** on phone display = Secure connection active
+
+### Check CAPF Status
+
+**Via Web UI:**
+- Navigate to **Devices**
+- Find device
+- Check **Operation**: "None" (enrollment complete)
+- Check **Expires**: Shows future date
+
+**Via API:**
+```bash
+curl http://localhost:8082/api/v1/devices/SEP001122334455
+```
+
+Verify:
+- `operation == "none"`
+- `certificate` field populated
+- `not_valid_after` is in future
+
+### Check Audit Logs
+
+**Web UI:**
+- **Admin** → **CAPF Audit Logs**
+- Filter by device name
+- Look for successful "enroll" operation
+
+**API:**
+```bash
+curl http://localhost:8082/api/v1/audit-logs?operation=enroll | \
+  jq '.[] | select(.resource_id == "SEP001122334455" and .success == true)'
+```
+
+Should show recent successful enrollment.
+
+## Best Practices
+
+### Security
+
+1. **Use "by password" authentication** - Most secure
+2. **Strong passwords** - Minimum 12 characters, mixed case, numbers
+3. **Unique passwords per device group** - Limit blast radius if leaked
+4. **Rotate passwords periodically** - Change every 6-12 months
+
+### Operational
+
+1. **Test with single phone first** - Verify process before bulk operations
+2. **Schedule during low-usage** - Minimize service impact
+3. **Communicate with users** - Send clear instructions and password
+4. **Monitor enrollment progress** - Daily checks during bulk operations
+5. **Document passwords securely** - Encrypted password manager
+
+### Planning
+
+1. **Batch enrollments** - Group by floor, department, or building
+2. **Stagger large deployments** - Don't enroll 1000 phones simultaneously
+3. **Set realistic timelines** - Allow 2-3 days per 100 phones
+4. **Plan for failures** - Expect 5-10% manual intervention rate
+
+## Next Steps
+
+After enrolling phones:
+
+1. **Monitor certificates** - Set up expiration alerts (see [Renew Certificates](/how-to/certificates/renew-certificates/))
+2. **Document enrolled devices** - Maintain inventory of device certificates
+3. **Plan renewal schedule** - Calendar reminders before certificates expire
+4. **Train support staff** - Ensure team can troubleshoot enrollment issues
+
+For complete deployment walkthrough, see the [First Phone Deployment Tutorial](/tutorials/first-deployment/).

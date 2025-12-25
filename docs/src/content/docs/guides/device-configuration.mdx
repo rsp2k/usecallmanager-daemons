@@ -1,0 +1,786 @@
+---
+title: Cisco 7962G Configuration Guide
+description: Step-by-step guide for configuring Cisco 7962G phones with TVS and CAPF
+sidebar:
+  order: 1
+---
+
+## Overview
+
+This guide provides complete instructions for configuring Cisco 7962G IP phones to work with UseCallManager TVS and CAPF services. The 7962G is a popular enterprise IP phone with full support for certificate-based security.
+
+## Prerequisites
+
+- Cisco 7962G phone with SCCP firmware 8.4(1)+ or SIP firmware 9.x+
+- TFTP server for phone configuration delivery
+- UseCallManager services running and accessible
+- Network connectivity between phone and services
+
+## Phone Specifications
+
+### Cisco 7962G Details
+
+| Feature | Specification |
+|---------|---------------|
+| Model | CP-7962G |
+| Display | 4.3" grayscale LCD |
+| Lines | 6 programmable line keys |
+| Network | 10/100 Mbps Ethernet (2 ports) |
+| Power | PoE (802.3af) or wall adapter |
+| Protocols | SCCP (Skinny) or SIP |
+| Security | TLS, SRTP, LSC/MIC support |
+
+### Firmware Versions
+
+**SCCP** (Skinny Client Control Protocol):
+- Recommended: `SCCP45.9-4-2SR3-1S` or later
+- Minimum: `SCCP45.8-4-1SR1`
+
+**SIP** (Session Initiation Protocol):
+- Recommended: `SIP45.9-4-2SR3-1S` or later
+- Minimum: `SIP45.9-0-1SR1`
+
+## Configuration File Structure
+
+### File Naming
+
+The phone configuration file must be named: `SEP<MAC_ADDRESS>.cnf.xml`
+
+**Example**: For MAC address `00:11:22:33:44:55`, the file is:
+```
+SEP001122334455.cnf.xml
+```
+
+**Finding Phone MAC Address**:
+- Press **Settings** button
+- Navigate to **Network Configuration**
+- Look for **MAC Address**
+- Note the 12 hex digits (e.g., 001122334455)
+
+## Complete Configuration Example
+
+### Basic Configuration with TVS and CAPF
+
+Create file `SEP001122334455.cnf.xml`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<device>
+  <deviceProtocol>SCCP</deviceProtocol>
+  <sshUserId>admin</sshUserId>
+  <sshPassword>cisco</sshPassword>
+
+  <devicePool>
+    <callManagerGroup>
+      <members>
+        <member priority="0">
+          <callManager>
+            <ports>
+              <!-- Non-secure port -->
+              <ethernetPhonePort>2000</ethernetPhonePort>
+              <!-- Secure port (TLS) -->
+              <secureEthernetPhonePort>2443</secureEthernetPhonePort>
+            </ports>
+            <processNodeName>cucm.example.com</processNodeName>
+          </callManager>
+        </member>
+      </members>
+    </callManagerGroup>
+
+    <!-- Date/Time Settings -->
+    <dateTimeSetting>
+      <dateTemplate>M/D/Y</dateTemplate>
+      <timeZone>Eastern Standard/Daylight Time</timeZone>
+      <ntps>
+        <ntp>
+          <name>pool.ntp.org</name>
+          <ntpMode>Unicast</ntpMode>
+        </ntp>
+      </ntps>
+    </dateTimeSetting>
+
+    <!-- CAPF Configuration -->
+    <capf>
+      <serverName>capf.example.com</serverName>
+      <port>3804</port>
+      <timeout>10</timeout>
+      <!-- Auto-detect pending operations -->
+      <autoUpgrade>true</autoUpgrade>
+      <!-- Poll interval in seconds -->
+      <operationPollInterval>60</operationPollInterval>
+    </capf>
+
+    <!-- TVS Configuration -->
+    <tvs>
+      <serverName>tvs.example.com</serverName>
+      <port>2445</port>
+      <timeout>10</timeout>
+    </tvs>
+
+    <!-- Enable Security -->
+    <security>
+      <enabled>true</enabled>
+      <transportType>TLS</transportType>
+    </security>
+
+    <!-- Network Settings -->
+    <vlanId>100</vlanId>
+    <cdpEnabled>true</cdpEnabled>
+    <lldpEnabled>true</lldpEnabled>
+  </devicePool>
+
+  <!-- Phone Label (shown on display) -->
+  <phoneLabel>Reception - Ext 1001</phoneLabel>
+
+  <!-- Firmware Load -->
+  <loadInformation>SCCP45.9-4-2SR3-1S</loadInformation>
+
+  <!-- TFTP Servers -->
+  <tftpServer1>tftp.example.com</tftpServer1>
+  <tftpServer2>tftp-backup.example.com</tftpServer2>
+
+  <!-- User Settings -->
+  <userLocale>
+    <name>English_United_States</name>
+    <langCode>en</langCode>
+  </userLocale>
+
+  <!-- Directory Services -->
+  <directoryURL>http://cucm.example.com/ccmcip/xmldirectory.jsp</directoryURL>
+  <servicesURL>http://cucm.example.com/ccmcip/getservicemenu.jsp</servicesURL>
+
+  <!-- Phone Features -->
+  <phoneFeatureList>
+    <phoneFeature>
+      <featureName>DND</featureName>
+      <featureStatus>1</featureStatus>
+    </phoneFeature>
+    <phoneFeature>
+      <featureName>Redial</featureName>
+      <featureStatus>1</featureStatus>
+    </phoneFeature>
+  </phoneFeatureList>
+
+  <!-- Softkeys -->
+  <softkeyTemplate>
+    <templateName>Standard User</templateName>
+  </softkeyTemplate>
+
+  <!-- Certificate Placeholder -->
+  <certificateHash>
+    <!-- Populated automatically after LSC installation -->
+  </certificateHash>
+
+  <!-- Logging -->
+  <deviceSecurityMode>2</deviceSecurityMode> <!-- 1=Non-secure, 2=Authenticated, 3=Encrypted -->
+</device>
+```
+
+### Configuration Sections Explained
+
+#### CallManager Group
+
+Defines which CallManager server(s) the phone registers with:
+
+```xml
+<callManagerGroup>
+  <members>
+    <member priority="0">
+      <callManager>
+        <ports>
+          <ethernetPhonePort>2000</ethernetPhonePort>
+          <secureEthernetPhonePort>2443</secureEthernetPhonePort>
+        </ports>
+        <processNodeName>cucm.example.com</processNodeName>
+      </callManager>
+    </member>
+  </members>
+</callManagerGroup>
+```
+
+- `priority="0"`: Primary CallManager (lowest number = highest priority)
+- `ethernetPhonePort`: Non-secure registration port
+- `secureEthernetPhonePort`: TLS-encrypted registration port
+- `processNodeName`: CallManager hostname or IP
+
+#### CAPF Section
+
+Configures certificate enrollment service:
+
+```xml
+<capf>
+  <serverName>capf.example.com</serverName>
+  <port>3804</port>
+  <timeout>10</timeout>
+  <autoUpgrade>true</autoUpgrade>
+  <operationPollInterval>60</operationPollInterval>
+</capf>
+```
+
+- `serverName`: CAPF service hostname (must resolve via DNS)
+- `port`: Always 3804 for CAPF protocol
+- `timeout`: Connection timeout in seconds
+- `autoUpgrade`: Auto-detect pending operations
+- `operationPollInterval`: How often to check for operations (seconds)
+
+#### TVS Section
+
+Configures certificate validation service:
+
+```xml
+<tvs>
+  <serverName>tvs.example.com</serverName>
+  <port>2445</port>
+  <timeout>10</timeout>
+</tvs>
+```
+
+- `serverName`: TVS service hostname
+- `port`: Always 2445 for TVS protocol
+- `timeout`: Validation request timeout
+
+#### Security Settings
+
+```xml
+<security>
+  <enabled>true</enabled>
+  <transportType>TLS</transportType>
+</security>
+```
+
+- `enabled`: Master security switch
+- `transportType`: `TLS` for encrypted, `TCP` for non-secure
+
+## Step-by-Step Deployment
+
+### Step 1: Prepare TFTP Server
+
+1. **Install TFTP server** (if not already running):
+   ```bash
+   # Ubuntu/Debian
+   sudo apt-get install tftpd-hpa
+
+   # RHEL/CentOS
+   sudo yum install tftp-server
+   ```
+
+2. **Configure TFTP directory** (typically `/srv/tftp` or `/var/lib/tftpboot`):
+   ```bash
+   sudo mkdir -p /srv/tftp
+   sudo chmod 755 /srv/tftp
+   ```
+
+3. **Upload Cisco firmware files**:
+   - Download firmware from Cisco.com
+   - Extract files to TFTP directory
+   - Verify files: `SCCP45.9-4-2SR3-1S.loads`, `*.sbn`, etc.
+
+4. **Start TFTP service**:
+   ```bash
+   sudo systemctl start tftpd-hpa
+   sudo systemctl enable tftpd-hpa
+   ```
+
+### Step 2: Create Phone Configuration
+
+1. **Get phone MAC address** (from phone display or label)
+
+2. **Create config file** `SEP<MAC>.cnf.xml` using template above
+
+3. **Customize settings**:
+   - Replace `cucm.example.com` with your CallManager
+   - Replace `capf.example.com` with your CAPF service
+   - Replace `tvs.example.com` with your TVS service
+   - Set `phoneLabel` to identify phone location/user
+   - Configure timezone and NTP
+
+4. **Copy to TFTP directory**:
+   ```bash
+   sudo cp SEP001122334455.cnf.xml /srv/tftp/
+   sudo chmod 644 /srv/tftp/SEP001122334455.cnf.xml
+   ```
+
+### Step 3: Configure Phone Network Settings
+
+**Method 1: DHCP (Recommended)**
+
+Configure DHCP server to provide:
+- IP address and subnet mask
+- Default gateway
+- DNS servers
+- **Option 150**: TFTP server IP address
+- **Option 66**: TFTP server hostname (alternative)
+
+Example DHCP config (ISC dhcpd):
+```
+subnet 10.0.100.0 netmask 255.255.255.0 {
+  range 10.0.100.100 10.0.100.200;
+  option routers 10.0.100.1;
+  option domain-name-servers 8.8.8.8, 8.8.4.4;
+  option tftp-server-name "tftp.example.com";
+  next-server 10.0.100.10; # TFTP server IP
+}
+```
+
+**Method 2: Manual Configuration**
+
+On phone:
+1. Press **Settings** button
+2. Navigate to **Network Configuration**
+3. Select **IPv4 Configuration**
+4. Set **DHCP**: No
+5. Configure:
+   - IP Address: `10.0.100.50`
+   - Subnet Mask: `255.255.255.0`
+   - Default Gateway: `10.0.100.1`
+   - DNS Server 1: `8.8.8.8`
+   - TFTP Server 1: `10.0.100.10`
+6. Press **Save**
+7. Phone will reboot
+
+### Step 4: Upload Server Certificates to TVS
+
+Before phones can validate servers, upload certificates to TVS:
+
+1. **Get CallManager certificate**:
+   ```bash
+   openssl s_client -connect cucm.example.com:443 \
+     -showcerts </dev/null 2>/dev/null | \
+     openssl x509 -outform PEM > cucm-cert.pem
+   ```
+
+2. **Get CAPF certificate**:
+   ```bash
+   openssl s_client -connect capf.example.com:3804 \
+     -showcerts </dev/null 2>/dev/null | \
+     openssl x509 -outform PEM > capf-cert.pem
+   ```
+
+3. **Upload to TVS via Web UI**:
+   - Navigate to https://your-tvs-domain.com
+   - Go to **Certificates** page
+   - Click **Upload Certificate**
+   - Select `cucm-cert.pem`
+   - Choose roles: `CCM`, `CCM+TFTP`
+   - Click **Upload**
+   - Repeat for `capf-cert.pem` with role `CAPF`
+
+### Step 5: Schedule Certificate Enrollment
+
+1. **Access CAPF web interface**:
+   - Navigate to https://your-domain.com/devices
+
+2. **Add device**:
+   - Click **Add Device**
+   - Device Name: `SEP001122334455`
+   - Operation: `Install`
+   - Authentication: `By Password`
+   - Password: `SecurePass123!`
+   - Key Size: `2048`
+   - Click **Save**
+
+3. **Note the password** - you'll need it on the phone
+
+### Step 6: Boot Phone and Register
+
+1. **Connect phone to network**:
+   - Plug in Ethernet cable (PoE or use power adapter)
+   - Phone powers on and shows Cisco logo
+
+2. **Watch boot process**:
+   - "Configuring IP..."
+   - "Requesting configuration..."
+   - "Loading firmware..." (if upgrade needed)
+   - "Registering..."
+
+3. **Verify registration**:
+   - Phone displays line labels and status
+   - Press **Settings** → **Status** → **Network Statistics**
+   - Look for "Registered" status
+
+### Step 7: Enroll LSC Certificate
+
+**Option A: Automatic (if configured)**
+
+With `autoUpgrade=true`, phone automatically detects pending operation:
+1. Phone displays: "CAPF operation pending"
+2. Phone prompts: "Enter authentication string:"
+3. Enter password: `SecurePass123!`
+4. Press **Submit** (or `#` key)
+5. Phone shows: "Contacting CAPF..."
+6. Progress: "Generating keys..." (30-60 seconds)
+7. Phone installs certificate and reboots
+
+**Option B: Manual Trigger**
+
+1. **Via phone menu**:
+   - Press **Settings** button
+   - Navigate to **Security Configuration**
+   - Select **LSC** (Locally Significant Certificate)
+   - Choose **Update**
+   - Enter authentication string when prompted
+   - Press **Submit**
+
+2. **Via keycode**:
+   - Pick up handset
+   - Dial `**#` (star-star-pound)
+   - Enter authentication string
+   - Press `#` to confirm
+
+### Step 8: Verify Security Status
+
+1. **Check phone display**:
+   - Look for padlock icon (🔒) next to line info
+   - Indicates secure, encrypted connection
+
+2. **Check phone settings**:
+   - Press **Settings** → **Status** → **Security Configuration**
+   - LSC Status: Should show "Installed"
+   - Certificate Serial Number: Should be populated
+   - Security Mode: "Encrypted"
+
+3. **Check web interface**:
+   - Navigate to https://your-domain.com/devices
+   - Find device `SEP001122334455`
+   - Status should show: Operation = "None" (completed)
+   - Certificate field populated with PEM data
+
+4. **Check audit logs**:
+   - Navigate to **Admin** → **CAPF Audit Logs**
+   - Should see successful enrollment entry
+   - Operation: "enroll"
+   - Success: Yes
+   - Client IP: Phone's IP address
+
+## Troubleshooting
+
+### Phone Not Downloading Configuration
+
+**Symptoms**:
+- Phone shows "No configuration available"
+- Phone stuck at boot screen
+
+**Solutions**:
+1. Verify TFTP server is running:
+   ```bash
+   sudo systemctl status tftpd-hpa
+   ```
+
+2. Test TFTP from another machine:
+   ```bash
+   tftp 10.0.100.10
+   > get SEP001122334455.cnf.xml
+   ```
+
+3. Check file permissions:
+   ```bash
+   ls -l /srv/tftp/SEP001122334455.cnf.xml
+   # Should be readable (644)
+   ```
+
+4. Verify DHCP Option 150 or 66 is set
+
+5. Check phone can reach TFTP server:
+   - Press **Settings** → **Network Configuration**
+   - Verify TFTP Server IP is correct
+
+### Phone Shows "Registration Rejected"
+
+**Symptoms**:
+- Phone displays "Registration rejected" or "No service"
+- Status shows "Unregistered"
+
+**Solutions**:
+1. Verify CallManager is reachable:
+   ```bash
+   ping cucm.example.com
+   telnet cucm.example.com 2000
+   ```
+
+2. Check CallManager has device configured
+
+3. Verify phone name matches CallManager (e.g., SEP001122334455)
+
+4. Check firewall allows TCP 2000 (non-secure) or 2443 (TLS)
+
+### Phone Shows "Security Error" or "Certificate Invalid"
+
+**Symptoms**:
+- Red padlock icon or security warning
+- Phone can't connect to CallManager securely
+
+**Solutions**:
+1. Verify CallManager certificate uploaded to TVS:
+   ```bash
+   curl https://your-domain.com/api/tvs/api/v1/certificates
+   ```
+
+2. Check TVS is reachable from phone network:
+   ```bash
+   nc -zv tvs.example.com 2445
+   ```
+
+3. View TVS audit logs for failed validations
+
+4. Re-upload CallManager certificate with correct roles
+
+5. Reboot phone to clear certificate cache
+
+### LSC Enrollment Fails
+
+**Symptoms**:
+- "Authentication failed" message
+- "CAPF connection failed"
+- Enrollment times out
+
+**Solutions**:
+1. **Authentication Failed**:
+   - Verify password matches CAPF database
+   - Check case-sensitivity
+   - Ensure device scheduled for installation
+   - Review CAPF audit logs for auth attempts
+
+2. **Connection Failed**:
+   - Verify CAPF service running:
+     ```bash
+     docker compose ps capf
+     ```
+   - Test connectivity:
+     ```bash
+     nc -zv capf.example.com 3804
+     ```
+   - Check firewall rules allow TCP 3804
+
+3. **Timeout**:
+   - Increase timeout in phone config
+   - Check CAPF service isn't overloaded
+   - Verify network latency is reasonable
+
+4. **General Debugging**:
+   - View CAPF logs:
+     ```bash
+     docker compose logs capf
+     ```
+   - Check operation is "install" (not "none")
+   - Verify authentication mode matches
+
+### Phone Shows Wrong Time/Date
+
+**Symptoms**:
+- Incorrect time displayed
+- Calls logged with wrong timestamps
+
+**Solutions**:
+1. Configure NTP in phone config:
+   ```xml
+   <ntps>
+     <ntp>
+       <name>pool.ntp.org</name>
+       <ntpMode>Unicast</ntpMode>
+     </ntp>
+   </ntps>
+   ```
+
+2. Set correct timezone:
+   ```xml
+   <timeZone>Eastern Standard/Daylight Time</timeZone>
+   ```
+
+3. Reboot phone to sync time
+
+## Advanced Configuration
+
+### Multiple CallManager Servers (Redundancy)
+
+```xml
+<callManagerGroup>
+  <members>
+    <member priority="0">
+      <callManager>
+        <ports>
+          <ethernetPhonePort>2000</ethernetPhonePort>
+          <secureEthernetPhonePort>2443</secureEthernetPhonePort>
+        </ports>
+        <processNodeName>cucm1.example.com</processNodeName>
+      </callManager>
+    </member>
+    <member priority="1">
+      <callManager>
+        <ports>
+          <ethernetPhonePort>2000</ethernetPhonePort>
+          <secureEthernetPhonePort>2443</secureEthernetPhonePort>
+        </ports>
+        <processNodeName>cucm2.example.com</processNodeName>
+      </callManager>
+    </member>
+  </members>
+</callManagerGroup>
+```
+
+- Phone tries priority 0 first
+- Falls back to priority 1 if primary fails
+- Automatic failover and recovery
+
+### VLAN Configuration
+
+```xml
+<vlanId>100</vlanId>
+<cdpEnabled>true</cdpEnabled>
+<lldpEnabled>true</lldpEnabled>
+<voiceVlanAccess>1</voiceVlanAccess>
+```
+
+- Separates voice traffic to VLAN 100
+- CDP/LLDP for VLAN discovery
+- Improves QoS and security
+
+### QoS Settings
+
+```xml
+<dscpForCallControl>24</dscpForCallControl> <!-- CS3 -->
+<dscpForAudio>46</dscpForAudio> <!-- EF -->
+```
+
+- Prioritizes voice traffic
+- CallControl: Lower priority (signaling)
+- Audio: Highest priority (RTP media)
+
+### Speed Dial Configuration
+
+```xml
+<speedDialInfo>
+  <speedDial>
+    <index>1</index>
+    <name>Help Desk</name>
+    <number>5555</number>
+  </speedDial>
+  <speedDial>
+    <index>2</index>
+    <name>Conference Room</name>
+    <number>5556</number>
+  </speedDial>
+</speedDialInfo>
+```
+
+## Configuration Templates
+
+### Minimal Secure Configuration
+
+For basic security without CAPF (MIC only):
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<device>
+  <deviceProtocol>SCCP</deviceProtocol>
+  <devicePool>
+    <callManagerGroup>
+      <members>
+        <member priority="0">
+          <callManager>
+            <ports>
+              <secureEthernetPhonePort>2443</secureEthernetPhonePort>
+            </ports>
+            <processNodeName>cucm.example.com</processNodeName>
+          </callManager>
+        </member>
+      </members>
+    </callManagerGroup>
+
+    <tvs>
+      <serverName>tvs.example.com</serverName>
+      <port>2445</port>
+    </tvs>
+
+    <security>
+      <enabled>true</enabled>
+      <transportType>TLS</transportType>
+    </security>
+  </devicePool>
+
+  <phoneLabel>Basic Secure Phone</phoneLabel>
+  <loadInformation>SCCP45.9-4-2SR3-1S</loadInformation>
+</device>
+```
+
+### Maximum Security Configuration
+
+For high-security environments with LSC:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<device>
+  <deviceProtocol>SCCP</deviceProtocol>
+  <devicePool>
+    <callManagerGroup>
+      <members>
+        <member priority="0">
+          <callManager>
+            <ports>
+              <!-- Only secure port -->
+              <secureEthernetPhonePort>2443</secureEthernetPhonePort>
+            </ports>
+            <processNodeName>cucm.example.com</processNodeName>
+          </callManager>
+        </member>
+      </members>
+    </callManagerGroup>
+
+    <capf>
+      <serverName>capf.example.com</serverName>
+      <port>3804</port>
+      <timeout>10</timeout>
+      <autoUpgrade>true</autoUpgrade>
+      <operationPollInterval>60</operationPollInterval>
+    </capf>
+
+    <tvs>
+      <serverName>tvs.example.com</serverName>
+      <port>2445</port>
+      <timeout>10</timeout>
+    </tvs>
+
+    <security>
+      <enabled>true</enabled>
+      <transportType>TLS</transportType>
+    </security>
+  </devicePool>
+
+  <phoneLabel>High Security Phone</phoneLabel>
+  <loadInformation>SCCP45.9-4-2SR3-1S</loadInformation>
+
+  <!-- Force LSC, no MIC fallback -->
+  <deviceSecurityMode>3</deviceSecurityMode>
+</device>
+```
+
+## Best Practices
+
+### Configuration Management
+
+1. **Version Control**: Store phone configs in Git
+2. **Templates**: Create templates for different phone types/roles
+3. **Automation**: Script config generation for bulk deployments
+4. **Documentation**: Document custom settings and deviations
+
+### Security
+
+1. **Always use TLS** for production deployments
+2. **Deploy LSC** instead of relying on MIC
+3. **Rotate passwords** for CAPF enrollment
+4. **Monitor audit logs** for security events
+5. **Segment network** (voice VLAN separate from data)
+
+### Deployment
+
+1. **Test thoroughly** with single phone before bulk rollout
+2. **Stage firmware upgrades** to avoid mass disruption
+3. **Schedule enrollments** during maintenance windows
+4. **Have rollback plan** (backup configs, MIC fallback)
+5. **Document procedures** for support team
+
+## Related Documentation
+
+- [TVS Protocol Details](/architecture/tvs-protocol)
+- [CAPF Protocol Details](/architecture/capf-protocol)
+- [Security Best Practices](/security/best-practices)
+- [API Reference](/api/overview)

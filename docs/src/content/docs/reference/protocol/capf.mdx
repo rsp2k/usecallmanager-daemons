@@ -1,0 +1,400 @@
+---
+title: CAPF Protocol Specification
+description: Technical specification for the Certificate Authority Proxy Function protocol
+---
+
+import { Card, CardGrid, Badge } from '@astrojs/starlight/components';
+
+## Protocol Parameters
+
+<Card>
+  - **Port**: <Badge text="3804" variant="note" />
+  - **Transport**: TCP with TLS
+  - **TLS Version**: TLS 1.0+ (device dependent)
+  - **Authentication**: Device name + optional password
+  - **Session Type**: Single request per connection
+</Card>
+
+## Certificate Types
+
+| Type | Name | Description |
+|------|------|-------------|
+| LSC | Locally Significant Certificate | Issued by local CAPF service |
+| MIC | Manufacturer Installed Certificate | Pre-installed by Cisco at factory |
+
+### LSC Characteristics
+
+- **Issuer**: Local CAPF service
+- **Subject**: Device name (e.g., `SEP001122334455`)
+- **Trust Scope**: Local deployment only
+- **Uniqueness**: One per device
+- **Validity**: Configurable (default 365 days)
+
+### MIC Characteristics
+
+- **Issuer**: Cisco manufacturing CA
+- **Subject**: Device serial number
+- **Trust Scope**: Global
+- **Uniqueness**: Pre-installed, cannot be regenerated
+- **Validity**: Long-term (10+ years)
+
+## Operation Types
+
+| Operation | Code | Purpose |
+|-----------|------|---------|
+| None | `0x00` | No pending operation |
+| Install | `0x01` | Generate and install new LSC |
+| Fetch | `0x02` | Retrieve existing certificate |
+| Delete | `0x03` | Remove LSC, revert to MIC |
+
+### Operation State Machine
+
+```
+┌─────────┐
+│  None   │◄───────────────────┐
+└────┬────┘                    │
+     │                         │
+     ├──► Install ──► Pending ─┤
+     │                         │
+     ├──► Fetch ───► Pending ─┤
+     │                         │
+     └──► Delete ──► Pending ─┘
+```
+
+## Authentication Modes
+
+| Mode | Security Level | Password Required |
+|------|----------------|-------------------|
+| No Password | Low | No |
+| By Null String | Low-Medium | Empty string |
+| By Password | High | User-entered password |
+
+## Cryptographic Parameters
+
+### RSA Key Sizes
+
+| Size (bits) | Status | Performance | Security | Cisco 7962G Support |
+|-------------|--------|-------------|----------|---------------------|
+| 512 | Deprecated | Fast | Insecure | Yes (not recommended) |
+| 1024 | Legacy | Moderate | Weak | Yes |
+| 2048 | Standard | Good | Strong | Yes (recommended) |
+| 3072 | High | Slower | Very strong | No |
+| 4096 | Maximum | Slowest | Excellent | No |
+
+### Elliptic Curve Options
+
+| Curve | NIST Name | Key Size Equivalent | Cisco 7962G Support |
+|-------|-----------|---------------------|---------------------|
+| P-256 | prime256v1 | ~3072-bit RSA | Limited |
+| P-384 | secp384r1 | ~7680-bit RSA | Limited |
+| P-521 | secp521r1 | ~15360-bit RSA | Limited |
+
+### Certificate Validity
+
+- **Minimum**: 1 day
+- **Default**: 365 days
+- **Maximum**: 3650 days (10 years)
+- **Unit**: Days from issuance
+
+## Message Protocol
+
+### Enrollment Request Message
+
+Binary message from device to server:
+
+```
+┌────────────────────────────────────────┐
+│ Device Name Length                     │  2 bytes (big-endian)
+│ Device Name                            │  Variable (UTF-8)
+│ Authentication String Length           │  2 bytes (big-endian)
+│ Authentication String                  │  Variable (UTF-8)
+│ Operation Code                         │  1 byte
+│ CSR Length                             │  2 bytes (big-endian)
+│ Certificate Signing Request (CSR)      │  Variable (DER format)
+└────────────────────────────────────────┘
+```
+
+### Enrollment Response Message
+
+Binary message from server to device:
+
+```
+┌────────────────────────────────────────┐
+│ Status Code                            │  1 byte
+│ Certificate Length                     │  2 bytes (big-endian)
+│ Certificate (DER)                      │  Variable
+└────────────────────────────────────────┘
+
+Status Codes:
+- 0x00: Success
+- 0x01: Authentication failed
+- 0x02: No operation scheduled
+- 0x03: CSR invalid
+- 0x04: Internal error
+```
+
+## Database Schema
+
+### Devices Table
+
+```sql
+CREATE TABLE devices (
+    device_name TEXT PRIMARY KEY,
+    operation TEXT NOT NULL,
+    authentication TEXT NOT NULL,
+    password TEXT,
+    key_size INTEGER,
+    key_type TEXT,
+    validity_days INTEGER,
+    certificate TEXT,
+    serial_number TEXT,
+    not_valid_before INTEGER,
+    not_valid_after INTEGER,
+    created_at INTEGER,
+    updated_at INTEGER
+);
+```
+
+**Indexes:**
+- Primary key on `device_name`
+- Index on `operation` for scheduled operations query
+
+### Valid Values
+
+**operation**: `none`, `install`, `fetch`, `delete`
+**authentication**: `no password`, `by null string`, `by password`
+**key_type**: `rsa`, `ec`
+**key_size** (RSA): `512`, `1024`, `2048`, `3072`, `4096`
+**key_size** (EC): `256`, `384`, `521`
+
+## Configuration File Schema
+
+### Phone Configuration XML
+
+```xml
+<capf>
+  <serverName>capf.example.com</serverName>
+  <port>3804</port>
+  <timeout>10</timeout>
+  <autoUpgrade>true</autoUpgrade>
+  <operationPollInterval>60</operationPollInterval>
+</capf>
+```
+
+**Fields:**
+- `serverName` - Hostname or IP address of CAPF server
+- `port` - TCP port (typically 3804)
+- `timeout` - Connection timeout in seconds
+- `autoUpgrade` - Boolean: enable automatic enrollment detection
+- `operationPollInterval` - Seconds between operation polls (default 60)
+
+## Supported Firmware
+
+### Cisco 7962G
+
+| Protocol | Minimum Firmware | LSC Support | Key Sizes | Notes |
+|----------|------------------|-------------|-----------|-------|
+| SCCP | 8.4(1) | Full | 512-2048 bit RSA | Recommended: 9.4(2)+ |
+| SIP | 9.0(1) | Full | 512-2048 bit RSA | Recommended: Latest 9.x |
+
+**Limitations:**
+- No 3072/4096-bit RSA support
+- Limited EC curve support
+- MIC cannot be regenerated
+
+## API Endpoints
+
+### Schedule Device Operation
+
+```
+POST /api/v1/devices
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "device_name": "SEP001122334455",
+  "operation": "install",
+  "authentication": "by password",
+  "password": "SecurePass123",
+  "key_size": 2048,
+  "key_type": "rsa",
+  "validity_days": 365
+}
+```
+
+**Response:**
+```json
+{
+  "device_name": "SEP001122334455",
+  "operation": "install",
+  "created_at": 1609459200
+}
+```
+
+### Get Device Status
+
+```
+GET /api/v1/devices/{device_name}
+```
+
+**Response:**
+```json
+{
+  "device_name": "SEP001122334455",
+  "operation": "none",
+  "authentication": "by password",
+  "key_size": 2048,
+  "key_type": "rsa",
+  "certificate": "-----BEGIN CERTIFICATE-----\n...",
+  "serial_number": "1234567890ABCDEF",
+  "not_valid_before": 1609459200,
+  "not_valid_after": 1640995200
+}
+```
+
+### Update Operation
+
+```
+PATCH /api/v1/devices/{device_name}/operation
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "operation": "delete"
+}
+```
+
+**Response:**
+```json
+{
+  "device_name": "SEP001122334455",
+  "operation": "delete",
+  "updated_at": 1609459200
+}
+```
+
+### List All Devices
+
+```
+GET /api/v1/devices
+```
+
+**Response:**
+```json
+[
+  {
+    "device_name": "SEP001122334455",
+    "operation": "none",
+    "authentication": "by password",
+    "key_size": 2048,
+    "certificate": "present",
+    "not_valid_after": 1640995200
+  }
+]
+```
+
+### Audit Logs
+
+```
+GET /api/v1/audit-logs?operation=enroll&limit=50
+```
+
+**Response:**
+```json
+[
+  {
+    "timestamp": 1609459200,
+    "client_ip": "10.0.100.15",
+    "operation": "enroll",
+    "resource_id": "SEP001122334455",
+    "success": true,
+    "error": null
+  }
+]
+```
+
+## Implementation Reference
+
+### Server Pseudocode
+
+```python
+# Accept TLS connection
+connection = accept_tls()
+
+# Read device authentication
+device_name = read_string(connection)
+auth_string = read_string(connection)
+operation = read_byte(connection)
+
+# Verify device exists and has pending operation
+device = database.query(
+    "SELECT * FROM devices WHERE device_name = ?",
+    device_name
+)
+
+if not device or device.operation == 'none':
+    return error_response(0x02)  # No operation
+
+# Validate authentication
+if device.authentication == 'by password':
+    if auth_string != device.password:
+        audit_log(device_name, 'enroll', False, 'auth_failed')
+        return error_response(0x01)  # Auth failed
+
+# Read CSR
+csr_length = read_uint16(connection)
+csr_data = connection.read(csr_length)
+
+# Generate certificate
+certificate = sign_certificate(
+    csr=csr_data,
+    issuer=capf_issuer_cert,
+    validity_days=device.validity_days or 365,
+    algorithm=device.key_type
+)
+
+# Send certificate
+response = bytes([0x00])  # Success
+response += len(certificate).to_bytes(2, 'big')
+response += certificate
+connection.write(response)
+
+# Update database
+database.execute(
+    "UPDATE devices SET operation='none', certificate=?, serial_number=? WHERE device_name=?",
+    certificate, get_serial(certificate), device_name
+)
+
+# Audit log
+audit_log(device_name, 'enroll', True, None)
+```
+
+## Performance Characteristics
+
+### Connection Handling
+
+- **Concurrency**: Unlimited (within system resources)
+- **Connection Type**: Single enrollment per connection
+- **Timeout**: Device-configured (typically 10 seconds)
+- **Key Generation**: On device (30-60 seconds for RSA-2048)
+
+### Database Performance
+
+- **Lookup Time**: O(1) - Primary key lookup on device_name
+- **Storage**: SQLite file-based
+- **Scaling**: Adequate for 1000s of devices
+- **Typical Query**: Single SELECT by device_name
+
+### Enrollment Duration
+
+| Key Type | Size | Phone Generation Time | Network Time | Total |
+|----------|------|----------------------|--------------|-------|
+| RSA | 1024 | 10-15 seconds | 1-2 seconds | 11-17 seconds |
+| RSA | 2048 | 30-60 seconds | 1-2 seconds | 31-62 seconds |
+| EC | P-256 | 5-10 seconds | 1-2 seconds | 6-12 seconds |
+
+**Note**: Times for Cisco 7962G. Newer phones are faster.

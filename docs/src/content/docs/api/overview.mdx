@@ -3,25 +3,33 @@ title: API Overview
 description: RESTful APIs for device management and security operations
 ---
 
+import { Card, CardGrid, Aside, Steps, Badge } from '@astrojs/starlight/components';
+
 # API Overview
 
 UseCallManager provides RESTful APIs for managing devices, certificates, and security operations.
 
 ## Base URLs
 
-When deployed behind Caddy reverse proxy:
+<CardGrid>
+  <Card title="Behind Caddy Reverse Proxy" icon="rocket">
+    - **CAPF API**: `https://{domain}/api/capf/api/v1/`
+    - **TVS API**: `https://{domain}/api/tvs/api/v1/`
+  </Card>
 
-- **CAPF API**: `https://{domain}/api/capf/api/v1/`
-- **TVS API**: `https://{domain}/api/tvs/api/v1/`
-
-Direct access (internal):
-- **CAPF API**: `http://capf:8082/api/v1/`
-- **TVS API**: `http://tvs:8081/api/v1/`
+  <Card title="Direct Access (Internal)" icon="laptop">
+    - **CAPF API**: `http://capf:8082/api/v1/`
+    - **TVS API**: `http://tvs:8081/api/v1/`
+  </Card>
+</CardGrid>
 
 ## Authentication
 
-Currently, the APIs do not require authentication. **In production, you should secure these endpoints** using one of:
+<Aside type="danger">
+Currently, the APIs do not require authentication. **In production, you must secure these endpoints!**
+</Aside>
 
+Recommended security options:
 - Network isolation (internal-only access)
 - API keys
 - OAuth 2.0
@@ -53,44 +61,47 @@ Standard error format:
 ```
 
 HTTP status codes:
-- `200` - Success
-- `201` - Created
-- `204` - No Content (successful deletion)
-- `400` - Bad Request (validation error)
-- `404` - Not Found
-- `500` - Internal Server Error
+- <Badge text="200" variant="success" /> - Success
+- <Badge text="201" variant="success" /> - Created
+- <Badge text="204" variant="success" /> - No Content (successful deletion)
+- <Badge text="400" variant="caution" /> - Bad Request (validation error)
+- <Badge text="404" variant="caution" /> - Not Found
+- <Badge text="500" variant="danger" /> - Internal Server Error
 
 ## API Categories
 
-### Device Management APIs
+<CardGrid>
+  <Card title="Device Management" icon="laptop">
+    Manage Cisco IP Phones and their certificates
 
-Manage Cisco IP Phones and their certificates:
+    **Endpoints**:
+    - `GET /devices` - List devices
+    - `POST /devices` - Add a device
+    - `GET /devices/{name}` - Get device details
+    - `PATCH /devices/{name}/operation` - Update operation mode
+    - `DELETE /devices/{name}` - Remove device
+    - `GET /devices/{name}/certificate` - Download device certificate
+  </Card>
 
-- `GET /devices` - List devices
-- `POST /devices` - Add a device
-- `GET /devices/{name}` - Get device details
-- `PATCH /devices/{name}/operation` - Update operation mode
-- `DELETE /devices/{name}` - Remove device
-- `GET /devices/{name}/certificate` - Download device certificate
+  <Card title="Security" icon="seti:lock">
+    Generate ITL files and encrypt configurations
 
-[Full Device API Reference →](./api-devices)
+    **Endpoints**:
+    - `POST /itl-file` - Generate ITLFile.tlv
+    - `POST /encrypt-config` - Encrypt device configuration
 
-### Security APIs
+    [Full Security API Reference →](./security)
+  </Card>
 
-Generate ITL files and encrypt configurations:
+  <Card title="System" icon="information">
+    Health checks and statistics
 
-- `POST /itl-file` - Generate ITLFile.tlv
-- `POST /encrypt-config` - Encrypt device configuration
-
-[Full Security API Reference →](./api-security)
-
-### System APIs
-
-Health checks and statistics:
-
-- `GET /health` - Service health status
-- `GET /stats` - Service statistics
-- `GET /issuer-certificate` - Get issuer certificate info
+    **Endpoints**:
+    - `GET /health` - Service health status
+    - `GET /stats` - Service statistics
+    - `GET /issuer-certificate` - Get issuer certificate info
+  </Card>
+</CardGrid>
 
 ## Quick Examples
 

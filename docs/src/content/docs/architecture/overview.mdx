@@ -1,0 +1,349 @@
+---
+title: System Architecture
+description: Understanding the UseCallManager security services architecture
+sidebar:
+  order: 1
+---
+
+import { Card, CardGrid, LinkCard, Aside, Steps, Badge } from '@astrojs/starlight/components';
+
+## Overview
+
+UseCallManager implements two critical Cisco Unified Communications security services:
+
+<CardGrid>
+  <Card title="TVS (Trust Verification Service)" icon="approve-check">
+    Validates server certificates for Cisco IP phones to verify server identities
+  </Card>
+  <Card title="CAPF (Certificate Authority Proxy Function)" icon="document">
+    Issues and manages locally significant certificates (LSC) for Cisco IP phones
+  </Card>
+</CardGrid>
+
+## Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     Cisco IP Phone                          │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │                                                       │  │
+│  │  Phone Firmware (SCCP/SIP)                          │  │
+│  │                                                       │  │
+│  │  ┌─────────────┐           ┌─────────────┐          │  │
+│  │  │ TVS Client  │           │ CAPF Client │          │  │
+│  │  └──────┬──────┘           └──────┬──────┘          │  │
+│  │         │                          │                  │  │
+│  └─────────┼──────────────────────────┼─────────────────┘  │
+│            │                          │                     │
+└────────────┼──────────────────────────┼─────────────────────┘
+             │ TLS                      │ TLS
+             │ Port 2445                │ Port 3804
+             │                          │
+┌────────────▼──────────────────────────▼─────────────────────┐
+│                UseCallManager Services                       │
+│                                                              │
+│  ┌────────────────────┐      ┌─────────────────────────┐   │
+│  │  TVS Service       │      │  CAPF Service           │   │
+│  │                    │      │                         │   │
+│  │  • Binary Protocol │      │  • Binary Protocol      │   │
+│  │  • Port 2445       │      │  • Port 3804            │   │
+│  │  • Certificate DB  │      │  • Device Database      │   │
+│  │  • REST API 8081   │      │  • CA Functions         │   │
+│  │                    │      │  • REST API 8082        │   │
+│  └────────────────────┘      └─────────────────────────┘   │
+│                                                              │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │              Web Management Frontend                  │  │
+│  │              https://your-domain.com                  │  │
+│  └──────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────┘
+```
+
+## Service Components
+
+### TVS (Trust Verification Service)
+
+**Purpose**: Provides certificate validation services for Cisco IP phones to verify server identities.
+
+**Key Functions**:
+- Maintains a database of trusted CA certificates
+- Responds to phone certificate validation requests
+- Provides certificate chain verification
+- Supports multiple certificate roles (SAST, CCM, TFTP, etc.)
+
+**Ports**:
+- <Badge text="2445" variant="note" /> - Binary TLS protocol for phone communication
+- <Badge text="8081" variant="tip" /> - REST API for management
+
+**How It Works**:
+
+<Steps>
+
+1. Phone needs to verify a server certificate (e.g., CUCM, TFTP)
+2. Phone sends certificate hash to TVS service
+3. TVS checks if certificate exists in trusted database
+4. TVS returns validation result with TTL (time-to-live)
+5. Phone caches result and trusts/rejects server accordingly
+
+</Steps>
+
+### CAPF (Certificate Authority Proxy Function)
+
+**Purpose**: Issues and manages locally significant certificates (LSC) for Cisco IP phones.
+
+**Key Functions**:
+- Generates RSA/EC certificates for devices
+- Manages certificate lifecycle (install, update, delete)
+- Stores device authentication credentials
+- Provides secure certificate enrollment
+
+**Ports**:
+- <Badge text="3804" variant="note" /> - Binary TLS protocol for phone communication
+- <Badge text="8082" variant="tip" /> - REST API for management
+
+**How It Works**:
+
+<Steps>
+
+1. Administrator schedules certificate operation for device
+2. Phone detects pending operation (via CUCM or manual trigger)
+3. Phone connects to CAPF with authentication string
+4. CAPF verifies device identity
+5. Phone generates key pair and sends CSR
+6. CAPF signs certificate and returns to phone
+7. Phone installs certificate for secure communications
+
+</Steps>
+
+## Data Flow
+
+### Certificate Enrollment Flow (CAPF)
+
+```
+Admin → Web UI → REST API (8082) → Device Database
+                                    ↓
+                                 Schedule: Install
+                                    ↓
+Phone → Reads Config → Detects Pending Op
+  ↓
+Phone → Connects to CAPF:3804 with Auth String
+  ↓
+CAPF → Validates Device Name + Password
+  ↓
+Phone → Generates Key Pair
+  ↓
+Phone → Sends CSR to CAPF
+  ↓
+CAPF → Signs Certificate
+  ↓
+CAPF → Returns Certificate to Phone
+  ↓
+Phone → Installs LSC
+  ↓
+CAPF → Updates Database: Status = Installed
+```
+
+### Trust Verification Flow (TVS)
+
+```
+Phone → Connects to Server (e.g., CUCM)
+  ↓
+Server → Presents TLS Certificate
+  ↓
+Phone → Extracts Certificate Hash
+  ↓
+Phone → Queries TVS:2445 with Hash
+  ↓
+TVS → Checks Certificate Database
+  ↓
+TVS → Returns: Found/Not Found + TTL
+  ↓
+Phone → Caches Result
+  ↓
+Phone → Accepts/Rejects Server Connection
+```
+
+## Database Schema
+
+### TVS Database (`tvs.sqlite3`)
+
+**Certificates Table**:
+- `certificate_hash` - SHA-256 hash (primary key)
+- `serial_number` - Certificate serial number
+- `subject_name` - Certificate subject DN
+- `issuer_name` - Certificate issuer DN
+- `certificate` - Full PEM-encoded certificate
+- `roles` - Comma-separated roles (CCM, TFTP, SAST, etc.)
+- `ttl` - Cache time-to-live in seconds
+
+**Audit Logs Table**:
+- Tracks all certificate operations
+- IP address, operation type, success/failure
+- Searchable via web UI
+
+### CAPF Database (`capf.sqlite3`)
+
+**Devices Table**:
+- `device_name` - SEP + MAC address (primary key)
+- `operation` - Scheduled operation (install/fetch/delete/none)
+- `authentication` - Auth mode (no password/by-null-string/by-password)
+- `password` - Authentication string (if required)
+- `key_size` - RSA key size or EC curve
+- `certificate` - Installed certificate (PEM)
+- `serial_number` - Certificate serial number
+- Validity dates
+
+**Audit Logs Table**:
+- Full operation tracking
+- Device operations, API calls, system events
+
+## Security Model
+
+### Authentication
+
+**CAPF Device Authentication**:
+- **No Password**: Phone authenticates by device name only (least secure)
+- **Null String**: Phone sends empty authentication string
+- **By Password**: Phone must provide matching authentication string (recommended)
+
+<Aside type="caution">
+For production environments, always use **By Password** authentication mode to prevent unauthorized certificate enrollment.
+</Aside>
+
+**Management API**:
+- Currently accessible on internal network only
+- Reverse proxied through Caddy
+- Should implement authentication for production use
+
+<Aside type="danger">
+The Management API currently has no authentication. Deploy behind a firewall or implement access controls before production use.
+</Aside>
+
+### Certificate Validation
+
+**TVS Certificate Roles**:
+- `SAST` - System Administrator Security Token
+- `CCM` - Cisco Unified Communications Manager
+- `CCM+TFTP` - Combined CCM and TFTP role
+- `TFTP` - TFTP server certificate
+- `CAPF` - CAPF service certificate
+- `APP-SERVER` - Application server
+- `TVS` - TVS service certificate
+
+### Storage
+
+- SQLite databases with file-based storage
+- Docker volumes persist data
+- Non-root user ownership (UID 1000)
+- Backup/restore via web UI or API
+
+<Aside type="tip">
+Regular backups are recommended! Use the web UI's backup feature to download database snapshots before making major changes.
+</Aside>
+
+## Deployment Architecture
+
+### Docker Services
+
+All services run in isolated Docker containers:
+
+```yaml
+Networks:
+  - internal: Backend communication (tvs, capf, frontend)
+  - caddy: External access via reverse proxy
+
+Services:
+  - TVS: Python/FastAPI + binary protocol server
+  - CAPF: Python/FastAPI + binary protocol server
+  - Frontend: Astro/Node.js SSR application
+  - Caddy: Reverse proxy with automatic HTTPS
+```
+
+### Service Discovery
+
+- Internal DNS: Services reach each other by name
+  - `http://tvs:8081` - TVS API
+  - `http://capf:8082` - CAPF API
+- External access through Caddy labels
+- API proxying for browser-based management
+
+## Performance Characteristics
+
+<CardGrid>
+  <Card title="TVS Performance" icon="rocket">
+    - **Latency**: Less than 10ms per validation request
+    - **Throughput**: Thousands of validations/second
+    - **Caching**: Phones cache results based on TTL
+    - **Database**: SQLite adequate for thousands of certificates
+  </Card>
+  <Card title="CAPF Performance" icon="laptop">
+    - **Enrollment Time**: 10-30 seconds per device
+    - **Concurrent Enrollments**: Limited by crypto operations
+    - **Key Generation**: Phone generates keys (offloaded from server)
+    - **Database**: SQLite handles hundreds of devices easily
+  </Card>
+</CardGrid>
+
+## Scalability Considerations
+
+### Current Design
+
+<Aside type="note">
+The current architecture is designed for small to medium deployments (100-1000 phones).
+</Aside>
+
+- Single-instance services
+- SQLite databases
+- Suitable for small to medium deployments (100-1000 phones)
+
+### Scaling Options
+
+For larger deployments:
+- Use PostgreSQL instead of SQLite
+- Load balance multiple service instances
+- Separate protocol and API servers
+- Implement Redis for session caching
+- Add monitoring and metrics collection
+
+## Monitoring
+
+### Health Checks
+
+Each service exposes health endpoints:
+- `GET /api/v1/health` - Service health status
+- Docker health checks use curl
+- Dashboard shows real-time service status
+
+### Audit Logging
+
+All operations logged to database:
+- Certificate uploads/deletions (TVS)
+- Device enrollments/operations (CAPF)
+- API calls with client IP
+- Success/failure status
+- Searchable via web UI
+
+## Next Steps
+
+<CardGrid>
+  <LinkCard
+    title="TVS Protocol Details"
+    description="Deep dive into the Trust Verification Service binary protocol"
+    href="/architecture/tvs-protocol/"
+  />
+  <LinkCard
+    title="CAPF Protocol Details"
+    description="Understanding the Certificate Authority Proxy Function protocol"
+    href="/architecture/capf-protocol/"
+  />
+  <LinkCard
+    title="Device Configuration Guide"
+    description="Configure Cisco 7962G phones to use TVS and CAPF services"
+    href="/guides/device-configuration/"
+  />
+  <LinkCard
+    title="API Reference"
+    description="REST API documentation for TVS and CAPF management"
+    href="/api/overview/"
+  />
+</CardGrid>

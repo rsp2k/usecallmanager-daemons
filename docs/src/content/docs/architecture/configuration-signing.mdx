@@ -1,0 +1,758 @@
+---
+title: Configuration Signing & Trust Model
+description: Understanding ITL, CTL, and how Cisco IP phones verify configuration files
+sidebar:
+  order: 4
+---
+
+## Overview
+
+Cisco IP phones use a sophisticated trust model based on signed configuration files to prevent tampering and ensure secure operation. This system involves multiple components working together to establish and maintain trust.
+
+## The Trust Chain
+
+```
+Phone Boot
+    ↓
+Load MIC (Manufacturer Installed Certificate)
+    ↓
+Download ITL File (Initial Trust List)
+    ↓
+Verify ITL Signature with MIC
+    ↓
+Trust Certificates in ITL
+    ↓
+Download Phone Config (SEP<MAC>.cnf.xml)
+    ↓
+Download CTL File (if present)
+    ↓
+Verify CTL Signature with ITL Certificates
+    ↓
+Trust Additional Certificates in CTL
+    ↓
+Validate All Server Connections via TVS
+```
+
+## Key Concepts
+
+### MIC (Manufacturer Installed Certificate)
+
+**What It Is:**
+- Certificate pre-installed by Cisco at the factory
+- Burned into phone firmware
+- Cannot be changed or removed
+- Issued by Cisco's root CA
+
+**Purpose:**
+- Bootstrap trust on first boot
+- Verify ITL file signature
+- Fallback trust anchor
+
+**Security Properties:**
+- Globally trusted (all Cisco phones trust same roots)
+- Long validity period (10+ years)
+- Less secure than LSC (can't be revoked per-device)
+
+### ITL (Initial Trust List)
+
+**What It Is:**
+- Small binary file containing trusted certificates
+- Signed by CAPF or Cisco's root CA
+- Downloaded via TFTP on every boot
+- Filename: `<phonemodel>.cnf.xml.sgn.xml` or `ITLFile.tlv`
+
+**Contents:**
+```
+ITL Structure:
+┌─────────────────────────────────────┐
+│ Version Information                 │
+├─────────────────────────────────────┤
+│ Signature (signed with CAPF key)    │
+├─────────────────────────────────────┤
+│ Trusted Certificate List:           │
+│  - CAPF Certificate                 │
+│  - TFTP Certificate                 │
+│  - CallManager Certificate(s)       │
+│  - TVS Certificate                  │
+│  - (Optional) Other Service Certs   │
+├─────────────────────────────────────┤
+│ Certificate Revocation Lists (CRLs) │
+└─────────────────────────────────────┘
+```
+
+**Purpose:**
+- Establish initial trust on phone boot
+- List certificates phone should trust
+- Small enough for quick download
+- Updated automatically on each boot
+
+**Signature Process:**
+1. CAPF creates ITL file with certificates
+2. CAPF signs ITL with its private key
+3. Signature appended to ITL file
+4. ITL uploaded to TFTP server
+
+**Phone Verification:**
+1. Phone downloads ITL via TFTP
+2. Phone extracts signature from ITL
+3. Phone verifies signature using MIC or previously trusted CAPF cert
+4. If valid, phone trusts all certificates in ITL
+5. If invalid, phone refuses to boot or falls back to MIC-only mode
+
+### CTL (Certificate Trust List)
+
+**What It Is:**
+- Extended trust list for additional certificates
+- Optional (not all deployments use CTL)
+- Larger than ITL, can contain more certificates
+- Downloaded after ITL verification
+
+**Contents:**
+- Additional trusted certificates
+- Extended certificate chains
+- Security token information (SAST)
+- Firmware signing certificates
+
+**Purpose:**
+- Add certificates beyond ITL's capacity
+- Support complex PKI hierarchies
+- Enable firmware signing
+- Administrative token verification
+
+**Difference from ITL:**
+- ITL: Essential, small, always present
+- CTL: Optional, larger, for advanced scenarios
+
+### SAST (System Administrator Security Token)
+
+**What It Is:**
+- USB security token (physical device)
+- Contains administrator certificate and private key
+- Used to sign CTL files
+- Optional hardware security module
+
+**Purpose:**
+- Sign CTL files with administrator authority
+- Prevent unauthorized CTL modifications
+- Two-factor authentication for admin operations
+- Air-gapped signing (offline security)
+
+**Usage:**
+1. Administrator creates CTL file
+2. Inserts SAST USB token
+3. Signs CTL with SAST private key
+4. SAST certificate included in ITL
+5. Phones verify CTL signature with SAST cert from ITL
+
+## Configuration File Signing
+
+### Why Sign Configuration Files?
+
+**Security Threats:**
+- **Man-in-the-Middle**: Attacker intercepts TFTP download
+- **TFTP Server Compromise**: Attacker modifies files on server
+- **Rogue TFTP Server**: Phone tricks into downloading from fake server
+- **Configuration Tampering**: Malicious settings injected
+
+**Signing Benefits:**
+- **Integrity**: Detect any modification to config
+- **Authenticity**: Verify config came from trusted source
+- **Non-repudiation**: Prove who created the config
+
+### Signed vs Unsigned Configs
+
+**Unsigned Configuration:**
+```xml
+<!-- SEP001122334455.cnf.xml -->
+<?xml version="1.0" encoding="UTF-8"?>
+<device>
+  <devicePool>
+    <callManagerGroup>
+      <members>
+        <member priority="0">
+          <callManager>
+            <processNodeName>cucm.example.com</processNodeName>
+          </callManager>
+        </member>
+      </members>
+    </callManagerGroup>
+  </devicePool>
+</device>
+```
+
+**Signed Configuration:**
+```xml
+<!-- SEP001122334455.cnf.xml.sgn.xml -->
+<?xml version="1.0" encoding="UTF-8"?>
+<SignedConfig>
+  <Signature>
+    <!-- Base64-encoded cryptographic signature -->
+    MIIGBgYJKoZIhvcNAQcCoIIF9zCCBfMCAQExCz...
+  </Signature>
+  <Config>
+    <!-- Original configuration (base64 encoded) -->
+    PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZ...
+  </Config>
+</SignedConfig>
+```
+
+### Signature Creation Process
+
+**Step 1: Create Configuration**
+```python
+# Generate phone configuration
+config_xml = generate_phone_config(
+    device_name="SEP001122334455",
+    callmanager="cucm.example.com",
+    # ... other settings
+)
+```
+
+**Step 2: Canonicalize**
+```python
+# Normalize XML for consistent signature
+# - Remove whitespace
+# - Sort attributes
+# - Consistent encoding
+canonical_xml = canonicalize_xml(config_xml)
+```
+
+**Step 3: Hash**
+```python
+# Create cryptographic hash
+import hashlib
+config_hash = hashlib.sha256(canonical_xml.encode()).digest()
+```
+
+**Step 4: Sign**
+```python
+# Sign hash with TFTP server private key
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import padding
+
+signature = tftp_private_key.sign(
+    config_hash,
+    padding.PKCS1v15(),
+    hashes.SHA256()
+)
+```
+
+**Step 5: Encode**
+```python
+import base64
+
+# Base64 encode signature
+signature_b64 = base64.b64encode(signature).decode()
+
+# Base64 encode original config
+config_b64 = base64.b64encode(config_xml.encode()).decode()
+```
+
+**Step 6: Create Signed File**
+```python
+signed_config = f"""<?xml version="1.0" encoding="UTF-8"?>
+<SignedConfig>
+  <Signature>{signature_b64}</Signature>
+  <Config>{config_b64}</Config>
+</SignedConfig>
+"""
+
+# Save as SEP001122334455.cnf.xml.sgn.xml
+```
+
+### Phone Verification Process
+
+**Step 1: Download**
+```
+Phone → TFTP Server: GET SEP001122334455.cnf.xml.sgn.xml
+TFTP Server → Phone: [SignedConfig file]
+```
+
+**Step 2: Extract Components**
+```python
+# Parse signed config
+signature_b64 = extract_signature(signed_config)
+config_b64 = extract_config(signed_config)
+
+# Decode from base64
+signature = base64.b64decode(signature_b64)
+config_xml = base64.b64decode(config_b64)
+```
+
+**Step 3: Verify Signature**
+```python
+# Get TFTP certificate from ITL
+tftp_cert = get_cert_from_itl(role="TFTP")
+
+# Extract public key
+tftp_public_key = tftp_cert.public_key()
+
+# Verify signature
+try:
+    tftp_public_key.verify(
+        signature,
+        hashlib.sha256(config_xml).digest(),
+        padding.PKCS1v15(),
+        hashes.SHA256()
+    )
+    # Signature valid!
+except InvalidSignature:
+    # Signature invalid - reject config
+    refuse_to_boot()
+```
+
+**Step 4: Apply Configuration**
+```
+If signature valid:
+  - Parse XML configuration
+  - Apply settings
+  - Continue boot process
+Else:
+  - Reject configuration
+  - Display error on phone
+  - Refuse to register
+```
+
+## ITL File Generation
+
+### Creating an ITL File
+
+**Tools:**
+- Cisco Unified Communications Manager (CUCM) - built-in ITL generator
+- OpenSSL + custom scripts
+- Third-party tools
+
+**Manual ITL Creation:**
+
+```python
+#!/usr/bin/env python3
+"""
+Generate ITL file for Cisco IP phones
+"""
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding
+import struct
+
+def create_itl(capf_cert, tftp_cert, cucm_cert, tvs_cert, capf_private_key):
+    """
+    Create ITL (Initial Trust List) file
+
+    Args:
+        capf_cert: CAPF certificate (for signing)
+        tftp_cert: TFTP server certificate
+        cucm_cert: CallManager certificate
+        tvs_cert: TVS certificate
+        capf_private_key: CAPF private key (to sign ITL)
+    """
+
+    # ITL Header
+    header = struct.pack(
+        '>I',  # Version (4 bytes, big-endian)
+        1      # Version 1
+    )
+
+    # Certificate count
+    cert_count = 4
+    cert_count_bytes = struct.pack('>I', cert_count)
+
+    # Serialize certificates
+    certificates = b''
+    for cert, role in [
+        (capf_cert, 'CAPF'),
+        (tftp_cert, 'TFTP'),
+        (cucm_cert, 'CCM'),
+        (tvs_cert, 'TVS'),
+    ]:
+        # Certificate in DER format
+        cert_der = cert.public_bytes(serialization.Encoding.DER)
+
+        # Certificate length
+        cert_len = struct.pack('>I', len(cert_der))
+
+        # Role/function identifier
+        role_bytes = role.encode('ascii').ljust(32, b'\x00')
+
+        # Append to certificates section
+        certificates += role_bytes + cert_len + cert_der
+
+    # Combine ITL contents (before signature)
+    itl_content = header + cert_count_bytes + certificates
+
+    # Sign ITL with CAPF private key
+    signature = capf_private_key.sign(
+        itl_content,
+        padding.PKCS1v15(),
+        hashes.SHA256()
+    )
+
+    # Signature length
+    sig_len = struct.pack('>I', len(signature))
+
+    # Final ITL file
+    itl_file = itl_content + sig_len + signature
+
+    return itl_file
+
+# Usage
+itl_data = create_itl(
+    capf_cert=load_cert('capf.pem'),
+    tftp_cert=load_cert('tftp.pem'),
+    cucm_cert=load_cert('cucm.pem'),
+    tvs_cert=load_cert('tvs.pem'),
+    capf_private_key=load_private_key('capf-key.pem')
+)
+
+# Save ITL file
+with open('ITLFile.tlv', 'wb') as f:
+    f.write(itl_data)
+
+# Upload to TFTP server
+upload_to_tftp('ITLFile.tlv', itl_data)
+```
+
+### ITL File Format
+
+**Binary Structure:**
+
+```
+Offset | Length | Field
+-------|--------|------------------
+0x0000 | 4      | Version (uint32, big-endian)
+0x0004 | 4      | Certificate Count (uint32)
+0x0008 | n      | Certificates (repeated)
+  +0   | 32     | Role/Function (ASCII, null-padded)
+  +32  | 4      | Certificate Length (uint32)
+  +36  | m      | Certificate (DER-encoded)
+0xXXXX | 4      | Signature Length (uint32)
+0xYYYY | s      | Signature (PKCS#1 v1.5, SHA-256)
+```
+
+**Example ITL (hexdump):**
+```
+00000000  00 00 00 01 00 00 00 04  43 41 50 46 00 00 00 00  |........CAPF....|
+00000010  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00  |................|
+00000020  00 00 00 00 00 00 00 00  00 00 03 e8 30 82 03 e4  |............0...|
+...
+```
+
+## Phone Boot Sequence with Signed Config
+
+### Complete Boot Flow
+
+```
+1. Power On
+   ↓
+2. Load Bootloader
+   ↓
+3. Verify Bootloader Signature (via hardware root of trust)
+   ↓
+4. Load Firmware
+   ↓
+5. Verify Firmware Signature (optional, if ITL includes firmware cert)
+   ↓
+6. Initialize Network (DHCP/Static)
+   ↓
+7. Discover TFTP Server (Option 150/66)
+   ↓
+8. Download ITL File
+   ├─ Request: ITLFile.tlv
+   ├─ Or: SEP001122334455.cnf.xml.sgn.xml
+   └─ Fallback: Check multiple locations
+   ↓
+9. Verify ITL Signature
+   ├─ Use MIC (first boot)
+   ├─ Or: Previously trusted CAPF cert
+   └─ If invalid: REFUSE TO BOOT
+   ↓
+10. Trust Certificates in ITL
+    ├─ CAPF → for future ITL updates
+    ├─ TFTP → for config download
+    ├─ CUCM → for registration
+    └─ TVS → for cert validation
+    ↓
+11. Download Phone Configuration
+    ├─ If .sgn.xml exists: Download signed config
+    ├─ Verify signature with TFTP cert from ITL
+    └─ Extract and parse configuration
+    ↓
+12. Download CTL (if configured)
+    ├─ Parse config for CTL URL
+    ├─ Download CTL file
+    ├─ Verify CTL signature with SAST/CAPF cert from ITL
+    └─ Add CTL certificates to trust store
+    ↓
+13. Connect to CallManager
+    ├─ TLS handshake
+    ├─ CUCM presents certificate
+    ├─ Phone queries TVS for validation
+    └─ If valid: Register with CUCM
+    ↓
+14. Check for CAPF Operations
+    ├─ Read config for pending CAPF operation
+    ├─ If operation scheduled: Connect to CAPF
+    └─ Enroll/update/delete certificate
+    ↓
+15. Operational
+    └─ Phone registered and ready
+```
+
+### Error Conditions
+
+**ITL Signature Invalid:**
+- **Symptom**: Phone shows "ITL signature invalid" or "Trust verification failed"
+- **Cause**: ITL corrupted, wrong signing key, TFTP compromise
+- **Resolution**: Phone refuses to boot or operates in degraded mode (MIC-only)
+
+**Configuration Signature Invalid:**
+- **Symptom**: "Configuration file rejected" error
+- **Cause**: Config modified after signing, wrong TFTP certificate
+- **Resolution**: Download unsigned config as fallback (if allowed by security policy)
+
+**TFTP Certificate Not in ITL:**
+- **Symptom**: "Unknown TFTP server" or similar trust error
+- **Cause**: TFTP cert changed but ITL not updated
+- **Resolution**: Regenerate ITL with new TFTP certificate
+
+## Security Implications
+
+### Attack Scenarios
+
+**Scenario 1: TFTP Server Compromise**
+
+**Attack:**
+1. Attacker gains access to TFTP server
+2. Modifies phone configuration to point to rogue CallManager
+3. Phones download modified config
+
+**Defense with Signing:**
+1. Phone downloads modified config
+2. Signature verification fails (attacker doesn't have private key)
+3. Phone rejects configuration
+4. Attack prevented ✅
+
+**Defense without Signing:**
+1. Phone downloads modified config
+2. No signature verification
+3. Phone applies malicious config
+4. Attack succeeds ❌
+
+**Scenario 2: Man-in-the-Middle**
+
+**Attack:**
+1. Attacker intercepts TFTP traffic
+2. Injects malicious configuration
+3. Phone receives fake config
+
+**Defense with Signing:**
+1. Phone receives config with invalid signature
+2. Verification fails
+3. Config rejected ✅
+
+**Scenario 3: Rogue TFTP Server**
+
+**Attack:**
+1. Attacker sets up fake TFTP server
+2. Uses DHCP poisoning to redirect phones
+3. Phones download from rogue server
+
+**Defense with ITL:**
+1. Rogue server can't sign ITL with CAPF key
+2. Phones reject ITL
+3. Phones refuse to trust rogue TFTP certificates ✅
+
+### Best Practices
+
+**1. Always Use Signed Configurations**
+- Generate ITL file with all required certificates
+- Sign all phone configs with TFTP private key
+- Regularly update ITL when certificates change
+
+**2. Protect Private Keys**
+- Store CAPF and TFTP private keys securely
+- Use hardware security modules (HSM) for production
+- Implement key rotation policies
+
+**3. Certificate Lifecycle Management**
+- Monitor certificate expiration
+- Regenerate ITL before certificates expire
+- Test ITL updates before deployment
+
+**4. Audit and Monitor**
+- Log all ITL generation events
+- Monitor TFTP download failures
+- Alert on signature verification failures
+
+**5. Secure TFTP Server**
+- Limit network access to TFTP port
+- Use read-only TFTP root directory
+- Enable TFTP logging
+- Regular security audits
+
+## Integration with UseCallManager
+
+### How UseCallManager Helps
+
+**CAPF Service:**
+- Generates certificates for ITL inclusion
+- Provides CAPF certificate for ITL signing
+- Issues LSC to phones after ITL establishes trust
+
+**TVS Service:**
+- Validates certificates presented by servers
+- Phones query TVS using certificates from ITL/CTL
+- Provides runtime certificate validation
+
+**ITL Generation Tool (Future):**
+- Web UI for creating ITL files
+- Automatically includes CAPF, TVS, and uploaded certificates
+- Signs ITL with CAPF private key
+- Exports for TFTP deployment
+
+### Workflow with UseCallManager
+
+```
+1. Upload Server Certificates to TVS
+   ↓
+2. Generate CAPF CA Certificate (if not exists)
+   ↓
+3. Create ITL File:
+   - Include CAPF cert
+   - Include TVS cert
+   - Include CallManager certs
+   - Include TFTP cert
+   - Sign with CAPF private key
+   ↓
+4. Deploy ITL to TFTP Server
+   ↓
+5. Configure Phones:
+   - TFTP server address
+   - ITL filename
+   ↓
+6. Phone Boot:
+   - Downloads ITL
+   - Verifies with MIC/previous CAPF
+   - Trusts certificates
+   ↓
+7. Phone Downloads Config:
+   - Signed with TFTP cert
+   - Verified using ITL
+   ↓
+8. Phone Queries TVS:
+   - Validates CUCM cert
+   - Uses TVS cert from ITL
+   ↓
+9. Phone Enrolls with CAPF:
+   - Uses CAPF cert from ITL
+   - Obtains LSC
+```
+
+## Debugging Signed Configurations
+
+### Common Issues
+
+**Issue: Phone Won't Boot After ITL Update**
+
+**Diagnosis:**
+1. Check phone logs (Settings → Status → Error Logs)
+2. Look for "ITL verification failed"
+3. Verify ITL signature:
+   ```bash
+   # Extract signature
+   dd if=ITLFile.tlv skip=... count=... of=signature.bin
+
+   # Verify with CAPF public key
+   openssl dgst -sha256 -verify capf-public.pem \
+     -signature signature.bin ITLFile.tlv
+   ```
+
+**Solution:**
+- Regenerate ITL with correct CAPF private key
+- Ensure CAPF certificate in ITL matches signing key
+
+**Issue: Configuration Rejected**
+
+**Diagnosis:**
+1. Phone displays "Configuration file error"
+2. Check that config file is signed (`.sgn.xml` extension)
+3. Verify TFTP certificate in ITL
+
+**Solution:**
+- Resign configuration with correct TFTP private key
+- Update ITL to include current TFTP certificate
+
+**Issue: Phone Boots But Can't Connect to Services**
+
+**Diagnosis:**
+1. Phone operational but shows security errors
+2. Check TVS audit logs for failed validations
+3. Verify server certificates uploaded to TVS
+
+**Solution:**
+- Upload all server certificates to TVS
+- Ensure certificates in ITL match actual server certs
+- Verify certificate roles are correct
+
+### Verification Commands
+
+**Check ITL Contents:**
+```bash
+# Parse ITL file (custom tool needed)
+python parse_itl.py ITLFile.tlv
+
+# Output:
+# Version: 1
+# Certificates:
+#   - CAPF: CN=CAPF-CA, Serial=1234...
+#   - TFTP: CN=tftp.example.com, Serial=5678...
+#   - CCM: CN=cucm.example.com, Serial=9ABC...
+#   - TVS: CN=tvs.example.com, Serial=DEF0...
+# Signature: Valid (SHA-256 with RSA)
+```
+
+**Verify Signed Config:**
+```bash
+# Extract and verify signature
+python verify_signed_config.py SEP001122334455.cnf.xml.sgn.xml
+
+# Output:
+# Signature: Valid
+# Signed by: CN=tftp.example.com
+# Config hash: sha256:abcd1234...
+# Config valid: Yes
+```
+
+## Future Enhancements
+
+### Planned Features for UseCallManager
+
+1. **ITL Generator Web UI**
+   - Visual certificate selection
+   - Automatic signing with CAPF key
+   - One-click ITL creation
+   - TFTP upload integration
+
+2. **Configuration Signing Service**
+   - Upload unsigned phone configs
+   - Automatic signing with TFTP key
+   - Bulk config signing
+   - Signed config repository
+
+3. **Trust Validation Dashboard**
+   - View current ITL contents
+   - Certificate expiration warnings
+   - ITL version tracking
+   - Phone trust status monitoring
+
+4. **Automated ITL Updates**
+   - Schedule ITL regeneration before cert expiry
+   - Automatic TFTP deployment
+   - Phone boot monitoring
+   - Rollback capability
+
+## Related Documentation
+
+- [CAPF Protocol Details](/architecture/capf-protocol)
+- [TVS Protocol Details](/architecture/tvs-protocol)
+- [Security Best Practices](/security/best-practices)
+- [Device Configuration Guide](/guides/device-configuration)

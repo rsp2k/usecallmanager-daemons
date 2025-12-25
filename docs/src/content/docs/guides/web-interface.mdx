@@ -1,0 +1,879 @@
+---
+title: Web Interface Guide
+description: Complete walkthrough of the UseCallManager web interface with screenshots
+sidebar:
+  order: 2
+---
+
+## Overview
+
+The UseCallManager web interface provides a modern, user-friendly dashboard for managing TVS and CAPF services. This guide walks through every page with detailed screenshots and explanations.
+
+## Dashboard
+
+The main dashboard provides an at-a-glance view of your entire system:
+
+### Statistics Cards
+
+**Top Row - Quick Metrics:**
+- **Certificates**: Total number of trusted certificates in TVS
+- **Devices**: Total enrolled devices in CAPF
+- **Pending Operations**: Count of devices awaiting certificate enrollment/deletion
+  - Breakdown: Install, Fetch, Delete operations
+- **Active Connections**: Current phone connections to TVS and CAPF services
+
+### Service Health
+
+**Real-time Status Monitoring:**
+- **TVS (Trust Verification)**: Shows healthy/offline status with green/red indicator
+  - Displays protocol port (2445)
+  - Status badge shows "healthy" when service responds
+- **CAPF (Certificate Authority)**: Certificate enrollment service status
+  - Displays protocol port (3804)
+  - Status badge with health indicator
+
+**Indicators:**
+- 🟢 Green dot + "healthy" badge = Service operational
+- 🔴 Red dot + "Offline" badge = Service unreachable
+
+### Quick Actions
+
+**Primary Actions:**
+- **Setup Wizard** (highlighted in blue): Launch onboarding flow for initial configuration
+- **Upload Certificate**: Add new trusted certificates to TVS
+- **Add Device**: Schedule certificate operations for phones
+
+### Error Display
+
+When services are offline, a red-bordered card appears showing:
+- Connection error details for each service
+- Helpful message: "Make sure the backend services are running and accessible"
+
+---
+
+## Onboarding Wizard
+
+The setup wizard guides you through initial system configuration in four steps.
+
+### Step 1: Welcome
+
+
+
+**Welcome Screen:**
+- Introduction to UseCallManager services
+- Explains TVS and CAPF functionality
+- Overview of certificate-based security
+- "Next" button to proceed
+
+**What You'll Learn:**
+- What TVS (Trust Verification Service) does
+- What CAPF (Certificate Authority Proxy Function) does
+- Why certificate security matters for IP phones
+
+### Step 2: Upload CA Certificate
+
+
+
+**Certificate Upload Interface:**
+- **File Upload Zone**: Drag-and-drop or click to select
+  - Accepts PEM-encoded X.509 certificates
+  - Shows upload progress
+- **Certificate Roles**: Multi-select checkboxes
+  - CCM (Call Manager)
+  - TFTP (Configuration Server)
+  - CAPF (Certificate Authority)
+  - Other roles for specialized services
+- **Purpose**: Upload your CallManager/server certificates so phones can validate them
+
+**Supported Formats:**
+- PEM (.pem, .crt)
+- DER (.der, .cer)
+- Base64 encoded certificates
+
+### Step 3: Configure Device
+
+
+
+**Device Configuration Form:**
+- **Device Name**: SEP + MAC address (e.g., SEP001122334455)
+  - Auto-formatted to uppercase
+  - Validates MAC address format
+- **Operation**: Dropdown selection
+  - Install: Generate new certificate
+  - Fetch: Retrieve existing certificate
+  - Delete: Remove certificate
+- **Authentication**: Security method
+  - No Password: Least secure, testing only
+  - By Null String: Empty auth string
+  - By Password: Required password (recommended)
+- **Password Field**: Appears when "By Password" selected
+  - Used by phone during enrollment
+  - Minimum 8 characters recommended
+- **Key Size**: RSA key strength
+  - 512, 1024, 2048, 3072, 4096 bits
+  - 2048 recommended for most phones
+
+**Validation:**
+- Device name format checked
+- Password strength indicator
+- Required fields highlighted
+
+### Step 4: Completion
+
+
+
+**Setup Complete:**
+- ✅ Summary of configuration
+- Certificate uploaded confirmation
+- Device scheduled for enrollment
+- **Next Steps** guidance:
+  - Configure phone to point to CAPF
+  - Trigger enrollment from phone menu
+  - Monitor audit logs for progress
+- **Finish** button returns to dashboard
+
+---
+
+## Certificates Page
+
+
+
+**Certificate Management:**
+
+### Page Header
+- **Title**: "Certificates" with certificate count badge
+- **Upload Certificate** button: Add new certificates
+
+### Certificate List
+
+**Empty State:**
+When no certificates are uploaded, shows:
+- Icon indicating empty state
+- "No certificates found" message
+- "Upload Certificate" call-to-action button
+- Helpful text: "Upload your first certificate to get started"
+
+**With Certificates (populated state):**
+Each certificate card displays:
+- **Certificate Hash**: First 16 characters of SHA-256 hash
+- **Subject Name**: Certificate DN (Distinguished Name)
+- **Issuer**: Who signed the certificate
+- **Serial Number**: Unique certificate identifier
+- **Roles**: Badges showing assigned roles (CCM, TFTP, etc.)
+- **Actions**:
+  - View Details: Expand full certificate information
+  - Download: Export certificate as PEM
+  - Delete: Remove from trusted list
+
+### Upload Dialog
+
+**File Upload:**
+- Drag-and-drop zone
+- Click to browse files
+- Preview selected file
+
+**Role Selection:**
+- Checkboxes for each role type
+- Multiple roles can be selected
+- Tooltips explain each role
+
+**TTL (Time-to-Live):**
+- Cache duration in seconds
+- Default: 86400 (24 hours)
+- Phones cache validation results for this period
+
+---
+
+## Devices Page
+
+
+
+**Device Management:**
+
+### Page Header
+- **Title**: "Devices" with device count
+- **Add Device** button: Schedule new operations
+
+### Device List
+
+**Empty State:**
+- No devices icon
+- "No devices found" message
+- "Add Device" call-to-action
+- Guidance: "Add your first device to begin certificate enrollment"
+
+**With Devices (populated state):**
+Each device card shows:
+- **Device Name**: SEP + MAC address
+- **Status Badge**:
+  - 🟡 Pending: Operation scheduled, awaiting phone action
+  - 🟢 Installed: Certificate successfully enrolled
+  - 🔴 Failed: Enrollment error (with reason)
+- **Operation**: Current scheduled action (Install/Fetch/Delete/None)
+- **Authentication**: Security method used
+- **Certificate Info** (if installed):
+  - Serial number
+  - Validity dates (Not Before / Not After)
+  - Expiration warning if within 30 days
+- **Actions**:
+  - View Certificate: See full PEM certificate
+  - Update Operation: Change scheduled operation
+  - Delete Device: Remove from database
+
+### Add Device Form
+
+**Required Fields:**
+- Device Name (validated format)
+- Operation type
+- Authentication method
+- Password (if "By Password" selected)
+
+**Optional Fields:**
+- Key Size (default: 2048)
+- EC Curve (for elliptic curve certificates)
+- Validity Days (default: 365)
+
+---
+
+## Issuer Certificate
+
+
+
+**CAPF CA Certificate Management:**
+
+### Certificate Information
+
+**Current Certificate Display:**
+- **Serial Number**: CA certificate identifier
+- **Subject**: CAPF CA distinguished name
+- **Issuer**: Self-signed or parent CA
+- **Validity Period**:
+  - Not Before date
+  - Not After date
+  - Days until expiration
+- **Key Type**: RSA or EC with key size/curve
+- **Public Key**: Fingerprint (SHA-256)
+
+### Certificate Actions
+
+**Download:**
+- Download as PEM file
+- Use for phone configuration
+- Import to other systems
+
+**Regenerate:**
+- Generate new CA certificate
+- Warning: Invalidates all issued device certificates
+- Requires re-enrollment of all devices
+- Confirmation dialog with impact warning
+
+### Certificate Preview
+
+**PEM Format Display:**
+- Read-only text area
+- Full certificate in PEM encoding
+- Copy to clipboard button
+- Formatted for easy reading
+
+**Use Cases:**
+- Upload to TVS for phones to validate CAPF
+- Configure in phone settings
+- Documentation and record-keeping
+
+---
+
+## Security Tools
+
+
+
+**Advanced Security Utilities:**
+
+### ITL (Initial Trust List) Generator
+
+**Purpose**: Create ITL files for Cisco phone secure boot
+
+**Configuration:**
+- **Phone Models**: Select target phone types
+  - 7900 series
+  - 8800 series
+  - 9900 series
+- **Certificate List**: Choose which certificates to include
+- **Signature**: Sign with CAPF private key
+- **Generate**: Create ITL file for TFTP deployment
+
+**Output:**
+- Binary ITL file
+- Ready for TFTP server
+- Phones download on boot
+
+### Config Encryptor
+
+**Purpose**: Encrypt sensitive phone configuration data
+
+**Features:**
+- **Input**: Plain XML configuration
+- **Encryption**: AES-256-GCM
+- **Key Management**: Auto-generated or custom key
+- **Output**: Encrypted config blob
+
+**Use Cases:**
+- Protect passwords in phone configs
+- Secure TFTP transmission
+- Compliance requirements
+
+### Certificate Validator
+
+**Purpose**: Verify certificate chains and validity
+
+**Checks:**
+- Certificate signature validation
+- Chain of trust verification
+- Expiration status
+- Key usage compliance
+- CRL/OCSP checking
+
+**Results:**
+- ✅ Valid: Certificate passes all checks
+- ⚠️ Warning: Valid but issues (expiring soon)
+- ❌ Invalid: Failed validation with reason
+
+---
+
+## Administration
+
+### TVS Audit Logs
+
+
+
+**Certificate Validation Audit Trail:**
+
+### Log Filters
+
+**Filter Options:**
+- **Operation Type**:
+  - All Operations
+  - Validate: Certificate validation requests
+  - Upload: Certificate additions
+  - Delete: Certificate removals
+- **Success Status**:
+  - All
+  - Success only
+  - Failures only
+- **Date Range**: Filter by time period
+- **Client IP**: Filter by requesting IP address
+
+### Log Entries
+
+**Each Entry Shows:**
+- **Timestamp**: Exact date and time (with timezone)
+- **Client IP**: Phone or system that made request
+- **Operation**: What action was performed
+- **Resource**: Certificate hash or identifier
+- **Status**: Success (green) or Failed (red)
+- **Details**: Expandable error messages or metadata
+
+**Common Operations:**
+- `validate`: Phone checking certificate validity
+- `upload`: New certificate added via web UI
+- `delete`: Certificate removed from trusted list
+- `system`: Service startup/shutdown events
+
+### Export Functionality
+
+**Export Logs:**
+- CSV format for spreadsheet analysis
+- JSON format for programmatic processing
+- Filtered results only
+- Full audit trail export
+
+---
+
+### CAPF Audit Logs
+
+
+
+**Device Enrollment Audit Trail:**
+
+### Log Filters
+
+**Filter Options:**
+- **Operation Type**:
+  - All Operations
+  - Enroll: Certificate enrollment attempts
+  - Update: Device configuration changes
+  - Delete: Device removal
+- **Success Status**: All/Success/Failures
+- **Date Range**: Time-based filtering
+- **Device Name**: Specific device lookup
+
+### Log Entries
+
+**Each Entry Shows:**
+- **Timestamp**: When operation occurred
+- **Client IP**: Phone IP address
+- **Operation**: Type of action
+- **Resource**: Device name (SEP...)
+- **Status**: Success/Failed with color coding
+- **Error Message**: Failure reason (if applicable)
+- **Metadata**: Additional context (JSON)
+
+**Common Operations:**
+- `enroll`: Phone connected for certificate
+- `authenticate`: Password verification attempt
+- `install`: Certificate successfully installed
+- `delete`: Certificate removed from phone
+- `schedule`: Operation scheduled via web UI
+
+**Failure Reasons:**
+- Authentication failed: Wrong password
+- Connection timeout: Network issue
+- No pending operation: Phone not scheduled
+- Certificate generation error: Crypto failure
+
+### Troubleshooting
+
+**Use Audit Logs to:**
+- Verify phones are contacting CAPF
+- Identify authentication failures
+- Track enrollment success rates
+- Debug network connectivity issues
+- Monitor for suspicious activity
+
+---
+
+### TVS Database Management
+
+
+
+**Database Backup and Restore:**
+
+### Database Information
+
+**Current Status:**
+- **Database File**: Path to SQLite file
+- **File Size**: Current database size
+- **Total Records**:
+  - Certificates count
+  - Audit logs count
+- **Last Modified**: Most recent change timestamp
+- **Schema Version**: Database format version
+
+### Backup Section
+
+**Create Backup:**
+- **Backup Name**: Auto-generated with timestamp
+  - Format: `tvs-backup-YYYY-MM-DD-HHmmss.sqlite3`
+  - Custom name option
+- **Include Audit Logs**: Checkbox
+  - Checked: Full backup (certificates + logs)
+  - Unchecked: Certificates only (smaller file)
+- **Compression**: Optional gzip compression
+- **Create Backup** button: Initiates backup
+
+**Download Backup:**
+- Downloads SQLite database file
+- Can be restored later
+- Store offsite for disaster recovery
+
+### Restore Section
+
+**Upload Backup:**
+- Drag-and-drop or browse for backup file
+- Validates backup integrity
+- Shows backup metadata:
+  - Creation date
+  - Record counts
+  - Compatibility check
+
+**Restore Options:**
+- **Replace Existing**: Overwrites current database
+  - ⚠️ Warning: Cannot be undone
+  - Confirmation required
+- **Merge**: Combines backup with current data
+  - Conflict resolution for duplicates
+  - Preserves existing records
+
+**Safety Features:**
+- Automatic backup before restore
+- Validation checks
+- Rollback capability
+- Transaction-based restore
+
+---
+
+### CAPF Database Management
+
+
+
+**Database Backup and Restore:**
+
+### Database Information
+
+**Current Status:**
+- **Database File**: Path to CAPF SQLite database
+- **File Size**: Storage used
+- **Total Records**:
+  - Devices count
+  - Audit logs count
+  - Pending operations count
+- **Last Modified**: Recent activity timestamp
+- **Schema Version**: Database compatibility
+
+### Backup Section
+
+**Create Backup:**
+- **Backup Name**: Timestamped filename
+  - Format: `capf-backup-YYYY-MM-DD-HHmmss.sqlite3`
+  - Customizable prefix
+- **Include Options**:
+  - ✅ Device records
+  - ✅ Certificates (PEM data)
+  - ✅ Audit logs (optional)
+  - ✅ Metadata (passwords excluded for security)
+- **Compression**: gzip option for large databases
+- **Create Backup** button
+
+**Security Note:**
+- Device authentication passwords are encrypted
+- Backup includes encrypted passwords
+- Restore maintains encryption
+- Secure backup storage recommended
+
+### Restore Section
+
+**Upload and Validate:**
+- File selection with validation
+- Compatibility check
+- Preview restore contents:
+  - How many devices will be added
+  - Certificate count
+  - Audit log entries
+
+**Restore Modes:**
+- **Replace**: Complete database replacement
+  - ⚠️ Deletes all existing data
+  - Requires confirmation
+  - Automatic pre-restore backup
+- **Merge**: Selective data import
+  - Skip duplicates
+  - Update existing devices
+  - Preserve newer records
+
+**Post-Restore Actions:**
+- Verify device counts
+- Check service health
+- Review audit logs
+- Test enrollment workflow
+
+---
+
+## Navigation
+
+### Sidebar Menu
+
+**Main Navigation:**
+- **Dashboard**: Home screen with overview
+- **Onboarding**: Setup wizard
+- **Certificates**: TVS certificate management
+- **Devices**: CAPF device enrollment
+- **Issuer Certificate**: CAPF CA certificate
+- **Security Tools**: Advanced utilities
+
+**Administration:**
+- **TVS Audit Logs**: Validation history
+- **CAPF Audit Logs**: Enrollment history
+- **TVS Database**: Backup/restore TVS
+- **CAPF Database**: Backup/restore CAPF
+
+**External Links:**
+- **Documentation**: Opens docs site in new tab
+  - Full protocol documentation
+  - Configuration guides
+  - API reference
+
+### Footer Information
+
+**Service Ports:**
+- TVS: Port 2445 (binary protocol)
+- CAPF: Port 3804 (binary protocol)
+
+**Version Information:**
+- Software version displayed
+- Build timestamp
+- Git commit hash (in dev mode)
+
+---
+
+## Common Workflows
+
+### Initial Setup
+
+1. **Start Onboarding Wizard** (Dashboard → Setup Wizard)
+2. **Upload CA Certificate** (Step 2)
+   - Select CallManager certificate
+   - Choose roles: CCM, TFTP
+3. **Configure First Device** (Step 3)
+   - Enter device MAC address
+   - Set operation: Install
+   - Choose authentication: By Password
+   - Enter secure password
+4. **Complete Setup** (Step 4)
+   - Review configuration
+   - Click Finish
+
+### Enrolling a Phone
+
+1. **Add Device** (Devices page → Add Device)
+   - Device Name: SEP001122334455
+   - Operation: Install
+   - Authentication: By Password
+   - Password: YourSecurePassword
+   - Key Size: 2048
+2. **Configure Phone** (on device)
+   - Settings → Security → LSC → Update
+   - Enter password when prompted
+3. **Monitor Progress** (CAPF Audit Logs)
+   - Watch for authentication
+   - Verify enrollment success
+4. **Verify Installation** (Devices page)
+   - Device status: Installed
+   - Certificate serial number shown
+   - Check expiration date
+
+### Adding Server Certificate
+
+1. **Obtain Certificate** (from server)
+   ```bash
+   openssl s_client -connect server:443 \
+     -showcerts | openssl x509 > server.pem
+   ```
+2. **Upload to TVS** (Certificates → Upload)
+   - Select server.pem file
+   - Choose roles based on server type
+   - Set TTL (default 86400)
+3. **Verify Upload** (Certificates list)
+   - Certificate appears in list
+   - Correct roles assigned
+4. **Test Validation** (check logs)
+   - Phone queries TVS
+   - Validation succeeds
+
+### Backup Procedures
+
+**Weekly Backup:**
+1. **TVS Backup** (Admin → TVS Database)
+   - Create backup with logs
+   - Download backup file
+   - Store securely offsite
+2. **CAPF Backup** (Admin → CAPF Database)
+   - Create backup with certificates
+   - Download backup file
+   - Secure storage
+
+**Before Major Changes:**
+- Always create backup first
+- Test restore procedure
+- Document changes made
+
+### Troubleshooting with Logs
+
+**Phone Can't Validate Server:**
+1. **Check TVS Audit Logs**
+   - Filter: Operation = validate
+   - Look for certificate hash
+   - Check success/failure
+2. **If Not Found**:
+   - Certificate not uploaded to TVS
+   - Upload server certificate
+3. **If Failed**:
+   - Review error message
+   - Check certificate validity
+   - Verify roles match
+
+**Phone Enrollment Fails:**
+1. **Check CAPF Audit Logs**
+   - Filter: Device name
+   - Look for authentication attempts
+2. **Common Issues**:
+   - Authentication failed: Wrong password
+   - No pending operation: Not scheduled
+   - Timeout: Network connectivity
+3. **Resolution**:
+   - Update device password
+   - Reschedule operation
+   - Check network/firewall
+
+---
+
+## Best Practices
+
+### Security
+
+1. **Use Strong Passwords**
+   - Minimum 12 characters
+   - Mix of letters, numbers, symbols
+   - Unique per device or device group
+
+2. **Regular Backups**
+   - Automated daily backups
+   - Weekly offsite storage
+   - Test restore procedures quarterly
+
+3. **Monitor Audit Logs**
+   - Daily review for failures
+   - Weekly security audit
+   - Alert on unusual patterns
+
+4. **Certificate Lifecycle**
+   - Track expiration dates
+   - Renew 30 days before expiry
+   - Automate renewal where possible
+
+### Operational
+
+1. **Document Everything**
+   - Device inventory with MAC addresses
+   - Password management (encrypted)
+   - Network topology
+   - Change log
+
+2. **Test Before Production**
+   - Pilot with single device
+   - Verify full workflow
+   - Document issues and resolutions
+
+3. **Staged Rollout**
+   - Enroll devices in batches
+   - Monitor each batch
+   - Pause if issues arise
+
+4. **Regular Maintenance**
+   - Review device status weekly
+   - Clean up old audit logs
+   - Update documentation
+
+---
+
+## Keyboard Shortcuts
+
+### Global
+
+- **`/`**: Focus search (when available)
+- **`Esc`**: Close dialogs/modals
+- **`Ctrl+K`** or **`Cmd+K`**: Quick actions menu (future feature)
+
+### Navigation
+
+- **`g d`**: Go to Dashboard
+- **`g c`**: Go to Certificates
+- **`g v`**: Go to Devices (devices)
+- **`g a`**: Go to Admin section
+
+### Forms
+
+- **`Enter`**: Submit form
+- **`Tab`**: Next field
+- **`Shift+Tab`**: Previous field
+
+---
+
+## Accessibility
+
+### Screen Readers
+
+- All buttons have descriptive labels
+- Form fields include helpful hints
+- Status indicators have text alternatives
+- Tables include proper headers
+
+### Keyboard Navigation
+
+- Full keyboard support
+- Visible focus indicators
+- Logical tab order
+- Skip links for main content
+
+### Visual
+
+- High contrast mode supported
+- Colorblind-friendly status indicators
+- Resizable text (up to 200%)
+- Clear visual hierarchy
+
+---
+
+## Mobile Responsiveness
+
+### Tablet View (768px+)
+
+- Sidebar collapses to icon menu
+- Cards stack vertically
+- Touch-friendly button sizes
+- Optimized forms
+
+### Mobile View (< 768px)
+
+- Full-width content
+- Hamburger menu
+- Simplified tables
+- Bottom navigation (future)
+
+### Touch Gestures
+
+- Swipe to navigate (planned)
+- Pull to refresh (planned)
+- Long-press for context menu (future)
+
+---
+
+## Tips and Tricks
+
+### Quick Device Add
+
+Instead of navigating to Devices → Add Device:
+1. Use Dashboard "Add Device" quick action
+2. Form pre-fills common settings
+3. One-click scheduling
+
+### Bulk Operations
+
+For enrolling many devices:
+1. Prepare CSV with device list
+2. Use bulk import (coming soon)
+3. Monitor via audit logs
+4. Track progress on dashboard
+
+### Certificate Organization
+
+Group certificates by role:
+1. Use consistent naming
+2. Tag with descriptive roles
+3. Document purpose in notes (future)
+4. Regular expiration audits
+
+### Audit Log Analysis
+
+Export logs for analysis:
+1. Filter to desired time range
+2. Export as CSV
+3. Open in spreadsheet
+4. Pivot tables for insights
+
+### Backup Automation
+
+Set up automated backups:
+1. Use API endpoints
+2. Cron job or scheduler
+3. Upload to cloud storage
+4. Verify backup integrity
+
+---
+
+## Related Documentation
+
+- [System Architecture](/architecture/overview/)
+- [TVS Protocol](/architecture/tvs-protocol/)
+- [CAPF Protocol](/architecture/capf-protocol/)
+- [Device Configuration](/guides/device-configuration/)
+- [API Reference](/api/overview/)
+- [Security Best Practices](/security/best-practices/)

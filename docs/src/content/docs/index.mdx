@@ -3,6 +3,8 @@ title: Introduction
 description: Overview of UseCallManager security services
 ---
 
+import { Card, CardGrid, LinkCard, Steps } from '@astrojs/starlight/components';
+
 # UseCallManager Security Services
 
 A modern implementation of security services for Cisco IP Phone systems, providing CAPF (Certificate Authority Proxy Function) and TVS (Trust Verification Service) capabilities.
@@ -11,33 +13,64 @@ A modern implementation of security services for Cisco IP Phone systems, providi
 
 UseCallManager provides the essential security infrastructure that Cisco IP Phones need to establish secure communications:
 
-- **CAPF (Certificate Authority Proxy Function)** - Issues and manages Locally Significant Certificates (LSCs) for phones
-- **TVS (Trust Verification Service)** - Provides certificate validation and trust verification
-- **Security Tools** - Generate ITL files and encrypt device configurations
+<CardGrid>
+  <Card title="CAPF" icon="document">
+    **Certificate Authority Proxy Function**
+
+    Issues and manages Locally Significant Certificates (LSCs) for phones
+  </Card>
+  <Card title="TVS" icon="approve-check">
+    **Trust Verification Service**
+
+    Provides certificate validation and trust verification
+  </Card>
+  <Card title="Security Tools" icon="seti:lock">
+    **Configuration Security**
+
+    Generate ITL files and encrypt device configurations
+  </Card>
+</CardGrid>
 
 ## Key Features
 
-### Certificate Management
-- Issue LSCs to Cisco IP Phones via SCEP-like protocol
-- Support for RSA (1024-2048 bit) and EC (secp256r1, secp384r1, secp521r1) keys
-- Device lifecycle management (pending, issued, expired states)
+<CardGrid>
+  <Card title="Certificate Management" icon="document">
+    - Issue LSCs to Cisco IP Phones via SCEP-like protocol
+    - Support for RSA (1024-2048 bit) and EC (secp256r1, secp384r1, secp521r1) keys
+    - Device lifecycle management (pending, issued, expired states)
+  </Card>
 
-### Trust Verification
-- ITL (Initial Trust List) file generation with certificate chains
-- Config file encryption for device-specific secure configuration delivery
-- PKCS#1 v1.5 signatures with SHA-512 for integrity
+  <Card title="Trust Verification" icon="approve-check">
+    - ITL (Initial Trust List) file generation with certificate chains
+    - Config file encryption for device-specific secure configuration delivery
+    - PKCS#1 v1.5 signatures with SHA-512 for integrity
+  </Card>
 
-### Modern Architecture
-- FastAPI backend with SQLite/PostgreSQL database
-- Astro frontend with React islands for interactive components
-- Docker Compose deployment with Caddy reverse proxy
-- RESTful APIs for integration with external configuration services
+  <Card title="Modern Architecture" icon="rocket">
+    - FastAPI backend with SQLite/PostgreSQL database
+    - Astro frontend with React islands for interactive components
+    - Docker Compose deployment with Caddy reverse proxy
+    - RESTful APIs for integration with external configuration services
+  </Card>
+</CardGrid>
 
 ## Getting Started
 
-1. [Installation & Setup](./installation) - Deploy the services
-2. [API Reference](./api-overview) - Integrate with your configuration service
-3. [Security Best Practices](./security-best-practices) - Secure your deployment
+<Steps>
+
+1. **Deploy the services**
+
+   Follow the [Installation & Setup](./installation) guide to get your services running
+
+2. **Integrate with your system**
+
+   Use the [API Reference](./api/overview) to integrate with your configuration service
+
+3. **Secure your deployment**
+
+   Review [Security Best Practices](./security/best-practices) to protect your infrastructure
+
+</Steps>
 
 ## Architecture
 

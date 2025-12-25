@@ -1,0 +1,443 @@
+---
+title: Configure Environment
+description: Configure environment variables for UseCallManager services
+---
+
+import { Aside, Steps, Badge } from '@astrojs/starlight/components';
+
+## Environment Configuration File
+
+UseCallManager uses a `.env` file for configuration. This file should be in the project root directory (same location as `docker-compose.yml`).
+
+## Creating the Configuration File
+
+<Steps>
+
+1. **Create `.env` file**
+
+   ```bash
+   cd usecallmanager-daemons
+   touch .env
+   ```
+
+2. **Add basic configuration**
+
+   ```bash
+   # Project name
+   COMPOSE_PROJECT=usecallmanager
+
+   # Domain for HTTPS
+   DOMAIN=usecallmanager.example.com
+   ```
+
+3. **Apply configuration**
+
+   Restart services to pick up changes:
+   ```bash
+   docker compose down
+   docker compose up -d
+   ```
+
+</Steps>
+
+## Configuration Options
+
+### Project Settings
+
+**COMPOSE_PROJECT**
+- **Purpose**: Prevents Docker namespace conflicts
+- **Default**: `usecallmanager`
+- **Example**: `COMPOSE_PROJECT=ucm-prod`
+
+**DOMAIN**
+- **Purpose**: Domain name for HTTPS/Caddy configuration
+- **Default**: None (must be set for HTTPS)
+- **Example**: `DOMAIN=phones.example.com`
+
+### CAPF Service Configuration
+
+**CAPF_PROTOCOL_PORT**
+- **Purpose**: Port for phone connections (certificate enrollment)
+- **Default**: `3804`
+- **Example**: `CAPF_PROTOCOL_PORT=3804`
+- **Note**: Phones expect 3804, change only if necessary
+
+**CAPF_API_PORT**
+- **Purpose**: REST API port for device management
+- **Default**: `8082`
+- **Example**: `CAPF_API_PORT=8082`
+
+**CAPF_DATABASE_URL**
+- **Purpose**: Database connection string
+- **Default**: `sqlite:////var/lib/capf/capf.sqlite3`
+- **SQLite Example**: `sqlite:////var/lib/capf/capf.sqlite3`
+- **PostgreSQL Example**: `postgresql://user:pass@db-host:5432/capf`
+
+<Aside type="tip">
+SQLite is suitable for development and small deployments (under 100 phones). Use PostgreSQL for production.
+</Aside>
+
+**CAPF_CERT_DIR**
+- **Purpose**: Directory for certificate storage
+- **Default**: `/var/lib/capf/certificates`
+- **Example**: `CAPF_CERT_DIR=/var/lib/capf/certificates`
+
+**CAPF_KEY_SIZE**
+- **Purpose**: Default RSA key size for issuer certificate
+- **Default**: `2048`
+- **Options**: `1024`, `2048`, `3072`, `4096`
+- **Recommended**: `2048`
+
+**CAPF_VALIDITY_DAYS**
+- **Purpose**: Default validity period for device certificates
+- **Default**: `365`
+- **Example**: `CAPF_VALIDITY_DAYS=730` (2 years)
+
+### TVS Service Configuration
+
+**TVS_PROTOCOL_PORT**
+- **Purpose**: Port for phone connections (certificate validation)
+- **Default**: `2445`
+- **Example**: `TVS_PROTOCOL_PORT=2445`
+- **Note**: Phones expect 2445, change only if necessary
+
+**TVS_API_PORT**
+- **Purpose**: REST API port for certificate management
+- **Default**: `8081`
+- **Example**: `TVS_API_PORT=8081`
+
+**TVS_DATABASE_URL**
+- **Purpose**: Database connection string
+- **Default**: `sqlite:////var/lib/tvs/tvs.sqlite3`
+- **SQLite Example**: `sqlite:////var/lib/tvs/tvs.sqlite3`
+- **PostgreSQL Example**: `postgresql://user:pass@db-host:5432/tvs`
+
+### Frontend Configuration
+
+**FRONTEND_PORT**
+- **Purpose**: Web UI port
+- **Default**: `4321`
+- **Example**: `FRONTEND_PORT=8080`
+
+## Example Configurations
+
+### Development Environment
+
+```bash
+# .env for development
+COMPOSE_PROJECT=usecallmanager-dev
+DOMAIN=localhost
+
+# Use default SQLite databases
+# Use default ports
+```
+
+This configuration:
+- Uses SQLite (no external database needed)
+- Runs on localhost
+- Uses standard ports
+
+### Production Environment
+
+```bash
+# .env for production
+COMPOSE_PROJECT=usecallmanager-prod
+DOMAIN=phones.example.com
+
+# PostgreSQL databases
+CAPF_DATABASE_URL=postgresql://capf:SecurePassword123@db.internal:5432/capf
+TVS_DATABASE_URL=postgresql://tvs:SecurePassword456@db.internal:5432/tvs
+
+# Longer certificate validity
+CAPF_VALIDITY_DAYS=730
+
+# Stronger issuer key
+CAPF_KEY_SIZE=3072
+```
+
+This configuration:
+- Uses PostgreSQL for better performance
+- Configured for public domain with HTTPS
+- 2-year certificate validity
+- Stronger cryptography
+
+### High-Availability Setup
+
+```bash
+# .env for HA deployment
+COMPOSE_PROJECT=usecallmanager-ha1
+DOMAIN=phones-ha1.example.com
+
+# Shared PostgreSQL cluster
+CAPF_DATABASE_URL=postgresql://capf:pass@pgpool.internal:5432/capf
+TVS_DATABASE_URL=postgresql://tvs:pass@pgpool.internal:5432/tvs
+
+# Non-conflicting ports for multiple instances
+CAPF_API_PORT=8182
+TVS_API_PORT=8181
+FRONTEND_PORT=4421
+```
+
+This configuration:
+- Runs multiple instances (ha1, ha2, etc.)
+- Uses shared database for data consistency
+- Different ports to avoid conflicts
+- Load balanced via external proxy
+
+## Common Configuration Tasks
+
+### Change Protocol Ports
+
+If ports 3804 or 2445 conflict:
+
+```bash
+# .env
+CAPF_PROTOCOL_PORT=13804
+TVS_PROTOCOL_PORT=12445
+```
+
+**Important**: You must also update phone configurations:
+```xml
+<capf>
+  <port>13804</port>  <!-- Match CAPF_PROTOCOL_PORT -->
+</capf>
+<tvs>
+  <port>12445</port>  <!-- Match TVS_PROTOCOL_PORT -->
+</tvs>
+```
+
+### Switch to PostgreSQL
+
+<Steps>
+
+1. **Create databases**
+
+   ```bash
+   # On PostgreSQL server
+   createdb -U postgres capf
+   createdb -U postgres tvs
+   ```
+
+2. **Update `.env`**
+
+   ```bash
+   CAPF_DATABASE_URL=postgresql://user:password@postgres-host:5432/capf
+   TVS_DATABASE_URL=postgresql://user:password@postgres-host:5432/tvs
+   ```
+
+3. **Restart services**
+
+   ```bash
+   docker compose down
+   docker compose up -d
+   ```
+
+4. **Verify connection**
+
+   Check health endpoints:
+   ```bash
+   curl http://localhost:8082/api/v1/health
+   curl http://localhost:8081/api/v1/health
+   ```
+
+   Should show `"database": "connected"`.
+
+</Steps>
+
+### Enable HTTPS with Caddy
+
+<Steps>
+
+1. **Set domain in `.env`**
+
+   ```bash
+   DOMAIN=phones.example.com
+   ```
+
+2. **Ensure DNS is configured**
+
+   ```bash
+   # Verify DNS points to your server
+   dig +short phones.example.com
+   # Should return your server's IP
+   ```
+
+3. **Open firewall ports**
+
+   ```bash
+   # Allow HTTPS
+   sudo ufw allow 443/tcp
+   sudo ufw allow 80/tcp  # For Let's Encrypt validation
+   ```
+
+4. **Restart to apply**
+
+   ```bash
+   docker compose down
+   docker compose up -d
+   ```
+
+5. **Check certificate acquisition**
+
+   ```bash
+   docker compose logs caddy | grep certificate
+   ```
+
+   Should show successful certificate acquisition from Let's Encrypt.
+
+</Steps>
+
+### Increase Certificate Validity
+
+To issue certificates valid for 2 years instead of 1:
+
+```bash
+# .env
+CAPF_VALIDITY_DAYS=730
+```
+
+Existing certificates retain their original validity. Only newly issued certificates use the new value.
+
+## Environment Variable Priority
+
+Configuration is read in this order (later overrides earlier):
+
+1. **Default values** (in code)
+2. **`.env` file** (in project root)
+3. **Shell environment** (exported variables)
+4. **`docker-compose.yml` environment section**
+
+Example:
+```bash
+# Set in shell (highest priority)
+export CAPF_API_PORT=9082
+
+# Start services
+docker compose up -d
+
+# CAPF API will use port 9082, not .env value
+```
+
+## Security Best Practices
+
+### Protect the `.env` File
+
+```bash
+# Set restrictive permissions
+chmod 600 .env
+
+# Ensure it's in .gitignore
+echo ".env" >> .gitignore
+```
+
+<Aside type="danger">
+**Never commit `.env` to version control!** It may contain database passwords and other secrets.
+</Aside>
+
+### Use Strong Database Passwords
+
+If using PostgreSQL:
+```bash
+# Generate strong password
+openssl rand -base64 32
+
+# Use in .env
+CAPF_DATABASE_URL=postgresql://capf:V8x2p9QmN7Kf4Lw1@db:5432/capf
+```
+
+### Separate Development and Production
+
+Use different `.env` files:
+```bash
+# Development
+cp .env.example .env.dev
+
+# Production
+cp .env.example .env.prod
+
+# Use specific file
+docker compose --env-file .env.prod up -d
+```
+
+## Verifying Configuration
+
+After changing `.env`:
+
+<Steps>
+
+1. **Check configuration is loaded**
+
+   ```bash
+   docker compose config
+   ```
+
+   This shows the final configuration with all variable substitutions.
+
+2. **Verify environment in containers**
+
+   ```bash
+   docker compose exec capf env | grep CAPF_
+   docker compose exec tvs env | grep TVS_
+   ```
+
+   Shows actual environment variables inside containers.
+
+3. **Test service connectivity**
+
+   ```bash
+   # Test each service
+   curl http://localhost:8082/api/v1/health
+   curl http://localhost:8081/api/v1/health
+   curl http://localhost:4321
+   ```
+
+</Steps>
+
+## Troubleshooting
+
+### Changes Not Applied
+
+**Problem**: Modified `.env` but services still use old configuration
+
+**Solution**:
+```bash
+# Stop containers completely
+docker compose down
+
+# Start fresh (loads .env again)
+docker compose up -d
+```
+
+Note: `docker compose restart` doesn't reload `.env`.
+
+### Invalid Database URL
+
+**Problem**: Services fail to start, logs show database connection error
+
+**Solution**: Check database URL format:
+```bash
+# SQLite (file path needs 4 slashes)
+sqlite:////var/lib/capf/capf.sqlite3
+
+# PostgreSQL
+postgresql://username:password@hostname:port/database
+```
+
+### Port Conflicts
+
+**Problem**: `bind: address already in use`
+
+**Solution**: Find what's using the port:
+```bash
+sudo lsof -i :8082
+```
+
+Either stop the conflicting service or change port in `.env`.
+
+## Next Steps
+
+After configuring environment:
+
+1. **Generate CAPF issuer certificate** - See [Generate Issuer Certificate](/how-to/certificates/generate-issuer/)
+2. **Upload server certificates** - See [Upload Certificates to TVS](/how-to/certificates/upload-to-tvs/)
+3. **Configure backups** - See [Backup & Restore](/how-to/installation/backup-restore/)

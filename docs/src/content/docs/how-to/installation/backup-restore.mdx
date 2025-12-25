@@ -1,0 +1,506 @@
+---
+title: Backup & Restore
+description: Backup and restore UseCallManager data and certificates
+---
+
+import { Aside, Steps, Badge } from '@astrojs/starlight/components';
+
+## What to Backup
+
+UseCallManager stores critical data in Docker volumes:
+
+| Volume | Contains | Criticality |
+|--------|----------|-------------|
+| `capf-data` | Device database, issuer certificate, device certificates | **Critical** |
+| `tvs-data` | Certificate database | **High** |
+
+<Aside type="danger">
+**Without backups**, you cannot recover from:
+- Hardware failure
+- Accidental deletion
+- Database corruption
+- Lost issuer certificate (cannot issue new device certificates)
+</Aside>
+
+## Backup Strategy
+
+### Recommended Backup Schedule
+
+- **Daily**: Automated backups of all volumes
+- **Before changes**: Manual backup before upgrades or configuration changes
+- **Weekly**: Off-site backup copy
+- **Monthly**: Verify backup restore process works
+
+### What Gets Backed Up
+
+**CAPF Data**:
+- Device names and scheduled operations
+- Issued LSC certificates
+- CAPF issuer certificate (**critical**)
+- CAPF issuer private key (**critical**)
+- Device enrollment history
+- Audit logs
+
+**TVS Data**:
+- Uploaded server certificates
+- Certificate roles and metadata
+- Validation history
+- Audit logs
+
+## Manual Backup
+
+### Backup All Data
+
+<Steps>
+
+1. **Create backup directory**
+
+   ```bash
+   mkdir -p ~/backups/usecallmanager/$(date +%Y%m%d)
+   cd ~/backups/usecallmanager/$(date +%Y%m%d)
+   ```
+
+2. **Backup CAPF volume**
+
+   ```bash
+   docker run --rm \
+     -v usecallmanager_capf-data:/data:ro \
+     -v $(pwd):/backup \
+     alpine \
+     tar czf /backup/capf-data-$(date +%Y%m%d-%H%M%S).tar.gz -C /data .
+   ```
+
+3. **Backup TVS volume**
+
+   ```bash
+   docker run --rm \
+     -v usecallmanager_tvs-data:/data:ro \
+     -v $(pwd):/backup \
+     alpine \
+     tar czf /backup/tvs-data-$(date +%Y%m%d-%H%M%S).tar.gz -C /data .
+   ```
+
+4. **Verify backups created**
+
+   ```bash
+   ls -lh *.tar.gz
+   ```
+
+   Should show two backup files with recent timestamps.
+
+5. **Test backup integrity**
+
+   ```bash
+   # Verify archive isn't corrupted
+   tar tzf capf-data-*.tar.gz > /dev/null && echo "CAPF backup OK"
+   tar tzf tvs-data-*.tar.gz > /dev/null && echo "TVS backup OK"
+   ```
+
+</Steps>
+
+### Backup Single Service
+
+To backup only CAPF:
+```bash
+docker run --rm \
+  -v usecallmanager_capf-data:/data:ro \
+  -v $(pwd):/backup \
+  alpine \
+  tar czf /backup/capf-backup.tar.gz -C /data .
+```
+
+To backup only TVS:
+```bash
+docker run --rm \
+  -v usecallmanager_tvs-data:/data:ro \
+  -v $(pwd):/backup \
+  alpine \
+  tar czf /backup/tvs-backup.tar.gz -C /data .
+```
+
+## Automated Backup Script
+
+Create a backup script for regular automated backups:
+
+<Steps>
+
+1. **Create backup script**
+
+   ```bash
+   cat > ~/backup-usecallmanager.sh <<'SCRIPT'
+   #!/bin/bash
+   set -euo pipefail
+
+   # Configuration
+   BACKUP_DIR=~/backups/usecallmanager
+   RETENTION_DAYS=30
+   DATE=$(date +%Y%m%d-%H%M%S)
+
+   # Create backup directory
+   mkdir -p "$BACKUP_DIR"
+   cd "$BACKUP_DIR"
+
+   echo "Starting backup at $(date)"
+
+   # Backup CAPF
+   echo "Backing up CAPF data..."
+   docker run --rm \
+     -v usecallmanager_capf-data:/data:ro \
+     -v "$BACKUP_DIR":/backup \
+     alpine \
+     tar czf "/backup/capf-$DATE.tar.gz" -C /data .
+
+   # Backup TVS
+   echo "Backing up TVS data..."
+   docker run --rm \
+     -v usecallmanager_tvs-data:/data:ro \
+     -v "$BACKUP_DIR":/backup \
+     alpine \
+     tar czf "/backup/tvs-$DATE.tar.gz" -C /data .
+
+   # Remove old backups
+   echo "Cleaning up backups older than $RETENTION_DAYS days..."
+   find "$BACKUP_DIR" -name "*.tar.gz" -mtime +$RETENTION_DAYS -delete
+
+   # Verify latest backups
+   if tar tzf "capf-$DATE.tar.gz" > /dev/null 2>&1 && \
+      tar tzf "tvs-$DATE.tar.gz" > /dev/null 2>&1; then
+     echo "Backup completed successfully at $(date)"
+     echo "Files created:"
+     ls -lh *-$DATE.tar.gz
+   else
+     echo "ERROR: Backup verification failed!"
+     exit 1
+   fi
+   SCRIPT
+
+   chmod +x ~/backup-usecallmanager.sh
+   ```
+
+2. **Test the script**
+
+   ```bash
+   ~/backup-usecallmanager.sh
+   ```
+
+3. **Schedule with cron**
+
+   ```bash
+   # Edit crontab
+   crontab -e
+
+   # Add daily backup at 2 AM
+   0 2 * * * /home/youruser/backup-usecallmanager.sh >> /var/log/usecallmanager-backup.log 2>&1
+   ```
+
+</Steps>
+
+## Off-Site Backup
+
+Store backups securely off-site to protect against site failures:
+
+### Using rsync
+
+```bash
+# Copy to remote server
+rsync -avz --delete \
+  ~/backups/usecallmanager/ \
+  backup-server:/backups/usecallmanager/
+```
+
+### Using rclone (Cloud Storage)
+
+<Steps>
+
+1. **Install rclone**
+
+   ```bash
+   sudo apt install rclone  # Debian/Ubuntu
+   ```
+
+2. **Configure remote**
+
+   ```bash
+   rclone config
+   # Follow prompts to add S3, Google Drive, etc.
+   ```
+
+3. **Upload backups**
+
+   ```bash
+   rclone sync ~/backups/usecallmanager/ remote:usecallmanager-backups/
+   ```
+
+</Steps>
+
+### Encrypted Backups
+
+For sensitive data, encrypt backups before off-site storage:
+
+```bash
+# Encrypt with GPG
+tar czf - -C /path/to/backup . | \
+  gpg --encrypt --recipient admin@example.com \
+  > backup-encrypted.tar.gz.gpg
+
+# Upload encrypted backup
+rclone copy backup-encrypted.tar.gz.gpg remote:secure-backups/
+```
+
+## Restore from Backup
+
+<Aside type="caution">
+Restoring from backup **replaces all current data**. Ensure this is what you want before proceeding.
+</Aside>
+
+### Full Restore
+
+<Steps>
+
+1. **Stop services**
+
+   ```bash
+   cd usecallmanager-daemons
+   docker compose down
+   ```
+
+2. **Remove existing volumes** (optional but recommended)
+
+   ```bash
+   docker volume rm usecallmanager_capf-data
+   docker volume rm usecallmanager_tvs-data
+   ```
+
+3. **Restore CAPF data**
+
+   ```bash
+   docker run --rm \
+     -v usecallmanager_capf-data:/data \
+     -v ~/backups/usecallmanager:/backup:ro \
+     alpine \
+     sh -c "cd /data && tar xzf /backup/capf-data-20240115-140000.tar.gz"
+   ```
+
+   **Replace the filename** with your actual backup file.
+
+4. **Restore TVS data**
+
+   ```bash
+   docker run --rm \
+     -v usecallmanager_tvs-data:/data \
+     -v ~/backups/usecallmanager:/backup:ro \
+     alpine \
+     sh -c "cd /data && tar xzf /backup/tvs-data-20240115-140000.tar.gz"
+   ```
+
+5. **Start services**
+
+   ```bash
+   docker compose up -d
+   ```
+
+6. **Verify restoration**
+
+   ```bash
+   # Check services are healthy
+   docker compose ps
+
+   # Verify data
+   curl http://localhost:8082/api/v1/devices
+   curl http://localhost:8081/api/v1/certificates
+   ```
+
+</Steps>
+
+### Restore Single Service
+
+To restore only CAPF:
+
+```bash
+# Stop CAPF
+docker compose stop capf
+
+# Restore volume
+docker run --rm \
+  -v usecallmanager_capf-data:/data \
+  -v ~/backups:/backup:ro \
+  alpine \
+  sh -c "cd /data && tar xzf /backup/capf-backup.tar.gz"
+
+# Restart CAPF
+docker compose start capf
+```
+
+## Disaster Recovery Scenarios
+
+### Scenario 1: Lost Issuer Certificate
+
+**Problem**: CAPF issuer private key is lost or corrupted.
+
+**Impact**: Cannot issue new device certificates.
+
+**Recovery**:
+
+<Steps>
+
+1. Restore CAPF data from backup (contains issuer key)
+2. Restart CAPF service
+3. Verify issuer certificate via web UI: **Admin** → **Issuer Certificate**
+4. Test by enrolling a test device
+
+</Steps>
+
+<Aside type="caution">
+**If no backup exists**, you must generate a new issuer certificate and re-enroll ALL phones. This is a major operational disruption.
+</Aside>
+
+### Scenario 2: Database Corruption
+
+**Problem**: SQLite database corrupted, services won't start.
+
+**Impact**: Cannot manage devices or certificates.
+
+**Recovery**:
+
+<Steps>
+
+1. Stop services
+2. Restore from most recent backup (see Full Restore above)
+3. If backup also corrupted, restore from earlier backup
+4. Restart services
+5. Check integrity:
+   ```bash
+   docker compose exec capf sqlite3 /var/lib/capf/capf.sqlite3 "PRAGMA integrity_check"
+   docker compose exec tvs sqlite3 /var/lib/tvs/tvs.sqlite3 "PRAGMA integrity_check"
+   ```
+
+</Steps>
+
+### Scenario 3: Accidental Data Deletion
+
+**Problem**: Accidentally deleted devices or certificates via API/UI.
+
+**Impact**: Missing device records or certificate validations failing.
+
+**Recovery**:
+
+<Steps>
+
+1. Stop services immediately (prevent further changes)
+2. Restore from backup taken before deletion
+3. Restart services
+4. Verify deleted data is restored
+
+</Steps>
+
+**Alternative** (if only few items deleted):
+- Manually recreate deleted device records
+- Re-upload deleted certificates to TVS
+- No full restore needed
+
+### Scenario 4: Hardware Failure
+
+**Problem**: Server hardware failed completely.
+
+**Impact**: All services down.
+
+**Recovery**:
+
+<Steps>
+
+1. **Provision new server**
+   - Install Docker
+   - Clone repository
+
+2. **Copy backups to new server**
+   ```bash
+   scp backup-server:/backups/usecallmanager/*.tar.gz new-server:~/backups/
+   ```
+
+3. **Restore volumes** (see Full Restore above)
+
+4. **Start services**
+   ```bash
+   docker compose up -d
+   ```
+
+5. **Verify operation**
+   - Test health endpoints
+   - Enroll test phone
+   - Validate certificates
+
+</Steps>
+
+## Backup Verification
+
+Regularly test your backups can be restored:
+
+### Monthly Restore Test
+
+<Steps>
+
+1. **Create test environment**
+
+   ```bash
+   # Use different project name
+   export COMPOSE_PROJECT=usecallmanager-test
+   ```
+
+2. **Restore backups to test volumes**
+
+   Follow restore procedure using test volume names.
+
+3. **Verify data integrity**
+
+   ```bash
+   # Check device count matches production
+   docker compose exec capf sqlite3 /var/lib/capf/capf.sqlite3 \
+     "SELECT COUNT(*) FROM devices"
+
+   # Check certificate count
+   docker compose exec tvs sqlite3 /var/lib/tvs/tvs.sqlite3 \
+     "SELECT COUNT(*) FROM certificates"
+   ```
+
+4. **Clean up test environment**
+
+   ```bash
+   docker compose down -v
+   ```
+
+</Steps>
+
+### Backup Checklist
+
+- [ ] Automated daily backups running
+- [ ] Off-site backup copy configured
+- [ ] Backup verification tested this month
+- [ ] Restore procedure documented
+- [ ] Backup retention policy set (30+ days)
+- [ ] Encrypted backups for off-site storage
+- [ ] Recovery time objective (RTO) defined
+- [ ] Recovery point objective (RPO) defined
+
+## Best Practices
+
+1. **Automate backups** - Use cron for daily automated backups
+2. **Test restores regularly** - Monthly restore verification
+3. **Store off-site** - Protect against site-wide failures
+4. **Encrypt sensitive data** - Especially for off-site backups
+5. **Monitor backup jobs** - Alert on failures
+6. **Document procedures** - Keep restore steps accessible
+7. **Retain multiple versions** - Keep 30+ days of backups
+8. **Backup before changes** - Manual backup before upgrades
+
+<Aside type="tip">
+The best backup is the one you've tested restoring from. Schedule regular restore drills.
+</Aside>
+
+## Next Steps
+
+After setting up backups:
+
+1. **Document your recovery plan** - Write step-by-step instructions for your team
+2. **Set up monitoring** - Alert on backup failures
+3. **Test disaster recovery** - Simulate hardware failure and practice recovery
+4. **Review retention policy** - Adjust based on compliance requirements

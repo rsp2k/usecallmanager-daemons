@@ -1,0 +1,506 @@
+---
+title: Renew Expiring Certificates
+description: Monitor and renew expiring device and issuer certificates
+---
+
+import { Aside, Steps, Badge } from '@astrojs/starlight/components';
+
+## Why Certificate Renewal Matters
+
+Certificates have expiration dates. When a certificate expires:
+
+- **Device certificates (LSC)**: Phone cannot authenticate to CallManager, loses service
+- **Issuer certificate**: Cannot issue new device certificates
+- **Server certificates**: Phones reject connections, show security errors
+
+Proactive renewal prevents service disruptions.
+
+## What Needs Renewal
+
+| Certificate Type | Typical Validity | Renewal Strategy |
+|------------------|------------------|------------------|
+| Device LSC | 1 year | Automated re-enrollment |
+| CAPF Issuer | 10 years | Manual rotation |
+| Server certificates | 1-2 years | Server administrator handles |
+
+## Monitoring Certificate Expiration
+
+### Check Device Certificate Expiration
+
+**Via Web UI:**
+
+<Steps>
+
+1. Navigate to **Devices** page
+
+2. Look at **Not Valid After** column
+
+3. Sort by expiration date (click column header)
+
+4. Identify devices expiring soon
+
+</Steps>
+
+**Via API:**
+
+```bash
+# Get all devices
+curl http://localhost:8082/api/v1/devices | \
+  jq '.[] | select(.not_valid_after != null) |
+    {device: .device_name, expires: (.not_valid_after | strftime("%Y-%m-%d"))}'
+```
+
+**Find certificates expiring in next 30 days:**
+
+```bash
+curl -s http://localhost:8082/api/v1/devices | \
+  jq --argjson threshold $(date -d '+30 days' +%s) \
+    '.[] | select(.not_valid_after < $threshold) |
+    {device: .device_name, expires: (.not_valid_after | strftime("%Y-%m-%d"))}'
+```
+
+### Check Issuer Certificate Expiration
+
+**Via Web UI:**
+
+1. Navigate to **Admin** → **Issuer Certificate**
+2. Check expiration date displayed
+3. Note warning if expiring within 6 months
+
+**Via API:**
+
+```bash
+curl http://localhost:8082/api/v1/issuer-certificate | \
+  jq '{subject: .subject, expires: (.not_valid_after | strftime("%Y-%m-%d"))}'
+```
+
+### Automated Monitoring Script
+
+Create a script to check expiration and send alerts:
+
+```bash
+#!/bin/bash
+# check-cert-expiry.sh
+
+API_URL="http://localhost:8082/api/v1"
+WARN_DAYS=30
+ALERT_EMAIL="admin@example.com"
+
+# Check issuer certificate
+issuer_expiry=$(curl -s "$API_URL/issuer-certificate" | jq -r '.not_valid_after')
+days_until_expiry=$(( ($issuer_expiry - $(date +%s)) / 86400 ))
+
+if [ $days_until_expiry -lt $WARN_DAYS ]; then
+  echo "WARNING: Issuer certificate expires in $days_until_expiry days!" | \
+    mail -s "CAPF Issuer Certificate Expiring" $ALERT_EMAIL
+fi
+
+# Check device certificates
+expiring_devices=$(curl -s "$API_URL/devices" | \
+  jq --argjson threshold $(date -d "+$WARN_DAYS days" +%s) \
+    '[.[] | select(.not_valid_after < $threshold) | .device_name] | length')
+
+if [ $expiring_devices -gt 0 ]; then
+  echo "$expiring_devices device certificate(s) expire within $WARN_DAYS days" | \
+    mail -s "Device Certificates Expiring" $ALERT_EMAIL
+fi
+```
+
+**Schedule with cron:**
+
+```bash
+# Run daily at 8 AM
+crontab -e
+
+# Add:
+0 8 * * * /path/to/check-cert-expiry.sh
+```
+
+## Renewing Device Certificates
+
+### Single Device Renewal
+
+<Steps>
+
+1. **Schedule Re-Enrollment**
+
+   Via Web UI:
+   - Navigate to **Devices**
+   - Find device with expiring certificate
+   - Click device name
+   - Change **Operation** to **Install**
+   - Set authentication password
+   - Click **Save**
+
+   Via API:
+   ```bash
+   curl -X PATCH http://localhost:8082/api/v1/devices/SEP001122334455/operation \
+     -H "Content-Type: application/json" \
+     -d '{
+       "operation": "install",
+       "password": "RenewalPass123"
+     }'
+   ```
+
+2. **Notify Phone User**
+
+   Inform user they'll need to enter password on phone.
+
+3. **Perform Enrollment**
+
+   On phone:
+   - **Settings** → **Security Configuration** → **LSC** → **Update**
+   - Enter password when prompted
+   - Wait for enrollment to complete
+
+4. **Verify Renewal**
+
+   Check device status shows new expiration date:
+   ```bash
+   curl http://localhost:8082/api/v1/devices/SEP001122334455 | \
+     jq '{expires: (.not_valid_after | strftime("%Y-%m-%d"))}'
+   ```
+
+</Steps>
+
+### Bulk Device Renewal
+
+For renewing many devices at once:
+
+<Steps>
+
+1. **Get List of Expiring Devices**
+
+   ```bash
+   # Devices expiring in next 30 days
+   curl -s http://localhost:8082/api/v1/devices | \
+     jq --argjson threshold $(date -d '+30 days' +%s) \
+       '.[] | select(.not_valid_after < $threshold) | .device_name' \
+     > expiring-devices.txt
+   ```
+
+2. **Schedule Renewal for All**
+
+   ```bash
+   # Bulk schedule script
+   while read device; do
+     echo "Scheduling renewal for $device"
+     curl -X PATCH http://localhost:8082/api/v1/devices/$device/operation \
+       -H "Content-Type: application/json" \
+       -d '{
+         "operation": "install",
+         "authentication": "by password",
+         "password": "BulkRenewal2024"
+       }'
+   done < expiring-devices.txt
+   ```
+
+3. **Notify Users**
+
+   Send email to all affected users with:
+   - Date enrollment will occur
+   - Password to use
+   - Instructions for entering password on phone
+
+4. **Monitor Progress**
+
+   Track enrollment completion:
+   ```bash
+   # Check how many still pending
+   curl -s http://localhost:8082/api/v1/devices | \
+     jq '[.[] | select(.operation == "install")] | length'
+   ```
+
+   Review audit logs for failures:
+   ```bash
+   curl -s http://localhost:8082/api/v1/audit-logs?operation=enroll&success=false
+   ```
+
+</Steps>
+
+### Automated Renewal
+
+Set up automatic renewal for phones nearing expiration:
+
+```bash
+#!/bin/bash
+# auto-renew-expiring.sh
+
+API_URL="http://localhost:8082/api/v1"
+RENEW_THRESHOLD_DAYS=30
+DEFAULT_PASSWORD="AutoRenew$(date +%Y%m)"
+
+# Find devices expiring soon
+expiring=$(curl -s "$API_URL/devices" | \
+  jq --argjson threshold $(date -d "+$RENEW_THRESHOLD_DAYS days" +%s) \
+    '[.[] | select(.not_valid_after < $threshold) | .device_name]')
+
+# Schedule renewal for each
+echo "$expiring" | jq -r '.[]' | while read device; do
+  echo "Auto-scheduling renewal for $device"
+
+  curl -X PATCH "$API_URL/devices/$device/operation" \
+    -H "Content-Type: application/json" \
+    -d "{
+      \"operation\": \"install\",
+      \"authentication\": \"by password\",
+      \"password\": \"$DEFAULT_PASSWORD\"
+    }"
+done
+
+# Send notification
+device_count=$(echo "$expiring" | jq 'length')
+echo "$device_count devices scheduled for automatic renewal" | \
+  mail -s "Automatic Certificate Renewal" admin@example.com
+```
+
+**Schedule monthly:**
+
+```bash
+# Run on 1st of each month
+0 0 1 * * /path/to/auto-renew-expiring.sh
+```
+
+## Renewing Issuer Certificate
+
+<Aside type="caution">
+**Major Operation**: Renewing the issuer certificate requires re-enrolling **ALL phones**. Plan carefully.
+</Aside>
+
+### When to Renew
+
+Renew issuer certificate when:
+- Current issuer expires within 6-12 months
+- Security policy requires key rotation
+- Upgrading to stronger key size
+- Organizational changes (company rename, etc.)
+
+### Renewal Process
+
+<Steps>
+
+1. **Plan Migration Window**
+
+   - Schedule during low-usage period
+   - Allow sufficient time (hours to days depending on phone count)
+   - Notify all stakeholders
+   - Prepare rollback plan
+
+2. **Generate New Issuer**
+
+   Keep old issuer active during transition:
+   - Generate new issuer certificate (see [Generate Issuer Certificate](/how-to/certificates/generate-issuer/))
+   - Save old issuer backup
+   - Document both certificates
+
+3. **Update ITL Files**
+
+   Generate new ITL files containing new issuer certificate hash.
+
+4. **Phased Rollout** (Recommended)
+
+   Test with small group first:
+   ```bash
+   # Pilot group: 5-10 phones
+   for device in SEP001122334455 SEP665544332211; do
+     curl -X PATCH http://localhost:8082/api/v1/devices/$device/operation \
+       -H "Content-Type: application/json" \
+       -d '{"operation": "install", "password": "NewIssuerTest"}'
+   done
+   ```
+
+   Monitor for 24-48 hours before full rollout.
+
+5. **Bulk Re-Enrollment**
+
+   After successful pilot:
+   ```bash
+   # Get all devices
+   curl -s http://localhost:8082/api/v1/devices | \
+     jq -r '.[].device_name' | \
+   while read device; do
+     curl -X PATCH http://localhost:8082/api/v1/devices/$device/operation \
+       -H "Content-Type: application/json" \
+       -d '{"operation": "install", "password": "IssuerRenewal2024"}'
+   done
+   ```
+
+6. **Monitor Completion**
+
+   Track progress daily:
+   ```bash
+   # Devices still pending
+   curl -s http://localhost:8082/api/v1/devices | \
+     jq '[.[] | select(.operation == "install")] |
+       {pending: length, devices: [.[].device_name]}'
+   ```
+
+7. **Handle Failures**
+
+   For phones that fail enrollment:
+   - Check audit logs for error details
+   - Manual intervention may be needed
+   - On-site password entry for remote phones
+
+8. **Archive Old Issuer**
+
+   After 100% re-enrollment:
+   - Move old issuer to archive
+   - Keep for reference (at least 1 year)
+   - Update documentation
+
+</Steps>
+
+## Renewal Best Practices
+
+### Timing
+
+**Device Certificates:**
+- Begin renewal 60 days before expiry
+- Complete renewal 30 days before expiry
+- Buffer time for failures
+
+**Issuer Certificate:**
+- Begin planning 12 months before expiry
+- Start testing 6 months before expiry
+- Execute 3-6 months before expiry
+
+### Communication
+
+**Before Renewal:**
+- Email notification 1 week prior
+- Include password and instructions
+- Set expectations for phone downtime
+
+**During Renewal:**
+- Status updates every 24 hours
+- Highlight completion percentage
+- Report issues promptly
+
+**After Renewal:**
+- Confirmation email
+- New expiration dates
+- Success metrics
+
+### Documentation
+
+Record for each renewal:
+- Date performed
+- Number of devices affected
+- Passwords used
+- Failures encountered
+- Time to complete
+- Lessons learned
+
+## Troubleshooting Renewal
+
+### Device Won't Re-Enroll
+
+**Problem**: Scheduled renewal but phone doesn't connect to CAPF.
+
+**Solutions:**
+
+<Steps>
+
+1. **Verify operation scheduled**
+
+   ```bash
+   curl http://localhost:8082/api/v1/devices/SEP001122334455 | \
+     jq '{operation: .operation}'
+   ```
+
+   Should show `"operation": "install"`
+
+2. **Check CAPF connectivity**
+
+   From phone network:
+   ```bash
+   nc -zv capf.example.com 3804
+   ```
+
+3. **Trigger manually on phone**
+
+   **Settings** → **Security Configuration** → **LSC** → **Update**
+
+4. **Review CAPF logs**
+
+   ```bash
+   docker compose logs capf --tail=100 | grep SEP001122334455
+   ```
+
+</Steps>
+
+### Renewal Fails: Authentication Error
+
+**Problem**: Phone connects but authentication fails.
+
+**Solutions:**
+
+- Verify password matches what's configured in CAPF
+- Ensure password entered correctly on phone (case-sensitive)
+- Check authentication mode matches (password vs null string)
+
+### Bulk Renewal Taking Too Long
+
+**Problem**: Large-scale renewal not completing in expected timeframe.
+
+**Solutions:**
+
+<Steps>
+
+1. **Parallel enrollment**
+
+   Phones can enroll concurrently. CAPF handles many simultaneous connections.
+
+2. **Identify stragglers**
+
+   ```bash
+   # Find devices not yet renewed
+   curl -s http://localhost:8082/api/v1/devices | \
+     jq '.[] | select(.operation == "install") | .device_name'
+   ```
+
+3. **Manual intervention**
+
+   For stuck devices:
+   - Reboot phone
+   - Manually trigger enrollment
+   - Check for connectivity issues
+
+4. **Extend deadline**
+
+   If needed, extend validity of old certificates temporarily by adjusting system clock (not recommended in production).
+
+</Steps>
+
+## Renewal Checklist
+
+Before renewal:
+- [ ] Identify all expiring certificates
+- [ ] Schedule maintenance window
+- [ ] Notify affected users
+- [ ] Prepare passwords/authentication
+- [ ] Backup current state
+- [ ] Test with pilot group (issuer renewal only)
+
+During renewal:
+- [ ] Schedule operations in CAPF
+- [ ] Monitor enrollment progress
+- [ ] Track failures and retry
+- [ ] Communicate status updates
+
+After renewal:
+- [ ] Verify all devices renewed
+- [ ] Check new expiration dates
+- [ ] Update documentation
+- [ ] Archive old certificates
+- [ ] Send completion notification
+
+## Next Steps
+
+After setting up renewal processes:
+
+1. **Automate monitoring** - Set up expiration alerts
+2. **Schedule regular reviews** - Monthly certificate status check
+3. **Document procedures** - Train team on renewal process
+4. **Plan issuer rotation** - Calendar reminder for issuer renewal

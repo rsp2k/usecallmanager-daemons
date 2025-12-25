@@ -1,0 +1,560 @@
+---
+title: Generate CAPF Issuer Certificate
+description: Generate the CAPF issuer certificate for signing device LSC certificates
+---
+
+import { Aside, Steps, Badge } from '@astrojs/starlight/components';
+
+## What is the Issuer Certificate?
+
+The CAPF issuer certificate is the **root certificate authority** for your phone system. It signs all device LSC certificates that CAPF issues to phones.
+
+Think of it as the "master key" that establishes trust - all phone certificates are signed by this issuer, creating a chain of trust back to this single certificate.
+
+<Aside type="danger">
+**Critical**: The issuer certificate private key must be protected! If lost, you cannot issue new device certificates. If compromised, an attacker can issue fraudulent certificates.
+</Aside>
+
+## When to Generate
+
+Generate an issuer certificate:
+
+- **Initial setup** - Before enrolling any phones
+- **Key compromise** - If private key is stolen or exposed
+- **Expiration approaching** - Before current issuer expires
+- **Policy change** - Switching to different key sizes or algorithms
+
+<Aside type="caution">
+Generating a new issuer certificate requires **re-enrolling ALL phones**. This is disruptive. Plan carefully.
+</Aside>
+
+## Prerequisites
+
+- CAPF service running
+- Access to web UI or API
+- Understanding of certificate parameters (key size, validity, etc.)
+
+## Generation Methods
+
+### Method 1: Web UI (Recommended for First Time)
+
+<Steps>
+
+1. **Access Web Interface**
+
+   Navigate to:
+   ```
+   http://localhost:4321
+   ```
+
+2. **Navigate to Issuer Certificate Page**
+
+   Click **Admin** → **Issuer Certificate** in the sidebar.
+
+3. **Check Current Status**
+
+   If an issuer certificate exists:
+   - Shows current certificate details
+   - Subject name, expiration, key type
+   - Option to regenerate
+
+   If no issuer exists:
+   - Shows "No issuer certificate found"
+   - Prompts to generate
+
+4. **Click Generate New Issuer Certificate**
+
+   Opens the generation form.
+
+5. **Configure Certificate Parameters**
+
+   Fill in the form:
+
+   **Subject Information:**
+   - **Common Name (CN)**: `CAPF-Issuer` (or your preferred name)
+   - **Organization (O)**: Your company name (e.g., `Acme Corp`)
+   - **Organizational Unit (OU)**: Department (optional, e.g., `IT`)
+   - **Country (C)**: Two-letter country code (e.g., `US`, `NZ`, `GB`)
+   - **State/Province (ST)**: State or province (optional)
+   - **Locality (L)**: City (optional)
+
+   **Cryptographic Parameters:**
+   - **Key Type**: RSA (recommended) or EC
+   - **Key Size**: 2048 bits (recommended)
+   - **Validity**: 10 years (3650 days)
+
+6. **Review Settings**
+
+   Double-check:
+   - Common name is descriptive
+   - Organization matches your company
+   - Key size is 2048 or higher
+   - Validity covers your planning horizon
+
+7. **Click Generate**
+
+   Generation takes a few seconds. Progress indicator shows status.
+
+8. **Verify Success**
+
+   After generation:
+   - Certificate details displayed
+   - Expiration date shown
+   - Download button available
+
+9. **Download and Backup**
+
+   **Critical**: Download the issuer certificate:
+   - Click **Download Certificate**
+   - Store securely in multiple locations
+   - This is needed for ITL file generation
+
+</Steps>
+
+### Method 2: API (For Automation)
+
+Generate via API for scripting:
+
+```bash
+curl -X POST http://localhost:8082/api/v1/issuer-certificate/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "common_name": "CAPF-Issuer",
+    "organization": "Acme Corp",
+    "country": "US",
+    "key_type": "rsa",
+    "key_size": 2048,
+    "validity_days": 3650
+  }'
+```
+
+**Response:**
+```json
+{
+  "status": "success",
+  "certificate": "-----BEGIN CERTIFICATE-----\n...",
+  "subject": "CN=CAPF-Issuer,O=Acme Corp,C=US",
+  "serial_number": "1A2B3C4D5E6F",
+  "not_before": 1609459200,
+  "not_after": 1925299200,
+  "key_type": "rsa",
+  "key_size": 2048
+}
+```
+
+## Parameter Selection Guide
+
+### Common Name (CN)
+
+**Purpose**: Identifies this certificate in logs and UIs
+
+**Recommendations**:
+- `CAPF-Issuer` - Simple and clear
+- `CAPF-CA` - Emphasizes CA function
+- `Company-CAPF-2024` - Includes company and year
+
+**Avoid**:
+- Generic names like "Root CA"
+- Device-specific names
+- Special characters or spaces
+
+### Organization (O)
+
+**Purpose**: Identifies the certificate owner
+
+**Recommendations**:
+- Your company's legal name
+- Matches existing certificates if possible
+- Clear and professional
+
+**Examples**:
+- `Acme Corporation`
+- `University of Example`
+- `City Hospital`
+
+### Country (C)
+
+**Purpose**: Two-letter ISO country code
+
+**Common Codes**:
+- `US` - United States
+- `GB` - United Kingdom
+- `CA` - Canada
+- `AU` - Australia
+- `NZ` - New Zealand
+- `DE` - Germany
+
+### Key Type and Size
+
+**RSA Key Sizes:**
+
+| Size | Security | Speed | Recommendation |
+|------|----------|-------|----------------|
+| 1024 | Weak | Fast | ❌ Never use |
+| 2048 | Strong | Good | ✅ **Recommended** |
+| 3072 | Very Strong | Slower | Good for high-security |
+| 4096 | Excellent | Slow | Overkill for phones |
+
+**Elliptic Curve (EC):**
+
+| Curve | Equivalent RSA | Recommendation |
+|-------|----------------|----------------|
+| P-256 | ~3072 bit | Good |
+| P-384 | ~7680 bit | Better |
+| P-521 | ~15360 bit | Best |
+
+<Aside type="tip">
+**Recommendation**: Use RSA-2048. It's the industry standard, well-supported by all phones, and provides excellent security through 2030+.
+</Aside>
+
+### Validity Period
+
+**How Long?**
+
+| Period | Pros | Cons | Use Case |
+|--------|------|------|----------|
+| 1 year | Frequent rotation | Operational overhead | Testing |
+| 5 years | Balanced | Re-enrollment every 5y | Small deployments |
+| 10 years | Set and forget | Long exposure if compromised | **Recommended** |
+| 20+ years | Very low overhead | Against best practices | Not recommended |
+
+<Aside type="note">
+The issuer certificate validity should exceed device certificate validity. If issuer expires, all device certificates become unverifiable.
+</Aside>
+
+## After Generation
+
+### Immediate Steps
+
+<Steps>
+
+1. **Download Certificate**
+
+   Save issuer certificate to secure location:
+   ```bash
+   # Via Web UI: Download button
+   # Via API: Save response 'certificate' field
+   ```
+
+2. **Backup Private Key**
+
+   The private key is stored in Docker volume. Back it up:
+   ```bash
+   docker run --rm \
+     -v usecallmanager_capf-data:/data:ro \
+     -v $(pwd):/backup \
+     alpine \
+     tar czf /backup/capf-issuer-$(date +%Y%m%d).tar.gz \
+     -C /data certificates/
+   ```
+
+   Store this backup securely, encrypted, off-site.
+
+3. **Update ITL Files**
+
+   Phones need to trust the CAPF issuer. Generate ITL files containing the issuer certificate hash.
+
+   (See ITL generation documentation for details)
+
+4. **Test Certificate Generation**
+
+   Verify CAPF can sign device certificates:
+   ```bash
+   # Schedule a test device
+   curl -X POST http://localhost:8082/api/v1/devices \
+     -H "Content-Type: application/json" \
+     -d '{
+       "device_name": "SEP000000000001",
+       "operation": "install",
+       "authentication": "no password",
+       "key_size": 2048
+     }'
+   ```
+
+   Check device can be enrolled (even if phone doesn't exist).
+
+</Steps>
+
+### Document the Certificate
+
+Record these details for future reference:
+
+- Generation date
+- Expiration date
+- Common name
+- Key type and size
+- Serial number
+- Responsible administrator
+- Backup locations
+
+## Regenerating Issuer Certificate
+
+### When to Regenerate
+
+- Current issuer expires within 6 months
+- Key size no longer meets security policy
+- Private key suspected compromised
+- Organizational changes (company rename, etc.)
+
+### Regeneration Process
+
+<Aside type="caution">
+**Warning**: Regenerating the issuer certificate invalidates all previously issued device certificates. All phones must be re-enrolled.
+</Aside>
+
+<Steps>
+
+1. **Plan the Migration**
+
+   - Schedule maintenance window
+   - Notify users of phone downtime
+   - Prepare re-enrollment procedures
+   - Test with small group first
+
+2. **Generate New Issuer**
+
+   Follow generation procedure above with new parameters.
+
+3. **Keep Old Issuer Temporarily**
+
+   Old issuer certificate is backed up automatically. Keep it accessible for reference.
+
+4. **Update ITL Files**
+
+   Generate new ITL files with new issuer certificate hash.
+
+5. **Deploy New ITL to Phones**
+
+   Push updated ITL files via TFTP.
+
+6. **Re-Enroll All Phones**
+
+   <Aside type="tip">
+   Use batch enrollment to minimize operational impact. Enroll by floor, department, or building.
+   </Aside>
+
+   ```bash
+   # Bulk schedule devices
+   for device in SEP001122334455 SEP665544332211; do
+     curl -X POST http://localhost:8082/api/v1/devices \
+       -H "Content-Type: application/json" \
+       -d "{
+         \"device_name\": \"$device\",
+         \"operation\": \"install\",
+         \"authentication\": \"by password\",
+         \"password\": \"SecurePass123\",
+         \"key_size\": 2048
+       }"
+   done
+   ```
+
+7. **Monitor Re-Enrollment**
+
+   Track progress via web UI:
+   - **Devices** page shows enrollment status
+   - **Audit Logs** show successful enrollments
+   - Monitor for failures
+
+8. **Archive Old Issuer**
+
+   After all phones re-enrolled, archive old issuer certificate securely.
+
+</Steps>
+
+## Troubleshooting
+
+### Generation Fails: "Key Generation Error"
+
+**Problem**: CAPF cannot generate key pair.
+
+**Solutions**:
+
+<Steps>
+
+1. **Check CAPF logs**
+
+   ```bash
+   docker compose logs capf --tail=100
+   ```
+
+   Look for error messages about key generation.
+
+2. **Verify sufficient entropy**
+
+   ```bash
+   # Check entropy pool
+   cat /proc/sys/kernel/random/entropy_avail
+   ```
+
+   Should be >1000. If low, install `rng-tools`:
+   ```bash
+   sudo apt install rng-tools
+   sudo systemctl start rng-tools
+   ```
+
+3. **Check disk space**
+
+   ```bash
+   df -h
+   ```
+
+   Ensure sufficient space in Docker volume.
+
+4. **Retry generation**
+
+   Wait a moment and try again.
+
+</Steps>
+
+### Cannot Download Certificate
+
+**Problem**: Download button doesn't work or returns error.
+
+**Solutions**:
+
+<Steps>
+
+1. **Retrieve via API**
+
+   ```bash
+   curl http://localhost:8082/api/v1/issuer-certificate > issuer.pem
+   ```
+
+2. **Extract from volume**
+
+   ```bash
+   docker run --rm \
+     -v usecallmanager_capf-data:/data:ro \
+     -v $(pwd):/backup \
+     alpine \
+     cp /data/certificates/issuer.pem /backup/
+   ```
+
+</Steps>
+
+### Lost Issuer Private Key
+
+**Problem**: Issuer certificate exists but private key is lost.
+
+**Impact**: Cannot issue new device certificates.
+
+**Recovery**:
+
+<Aside type="danger">
+**Critical Situation**: If you have no backup of the private key, you **must** generate a new issuer certificate and re-enroll ALL phones. There is no other recovery option.
+</Aside>
+
+<Steps>
+
+1. **Check backups**
+
+   Search all backup locations for private key.
+
+2. **Check Docker volume**
+
+   ```bash
+   docker run --rm \
+     -v usecallmanager_capf-data:/data:ro \
+     alpine \
+     ls -la /data/certificates/
+   ```
+
+   Look for `issuer-key.pem` or similar.
+
+3. **If truly lost**
+
+   - Generate new issuer certificate
+   - Update ITL files
+   - Re-enroll all phones
+
+</Steps>
+
+### Issuer Certificate Expired
+
+**Problem**: Issuer certificate expired, device enrollments failing.
+
+**Solutions**:
+
+<Aside type="caution">
+If the issuer expired, device certificates issued by it may also be considered invalid by phones. Generate a new issuer and re-enroll.
+</Aside>
+
+<Steps>
+
+1. **Generate new issuer immediately**
+
+   Follow generation procedure.
+
+2. **Update ITL files**
+
+   Generate new ITL with new issuer.
+
+3. **Re-enroll affected phones**
+
+   Phones with certificates signed by expired issuer need re-enrollment.
+
+</Steps>
+
+## Security Best Practices
+
+### Protect the Private Key
+
+The issuer private key is the most critical security asset:
+
+1. **Restrict access**
+   ```bash
+   # On the server
+   chmod 600 /var/lib/capf/certificates/issuer-key.pem
+   ```
+
+2. **Encrypt backups**
+   ```bash
+   # Encrypt before storing off-site
+   tar czf - /path/to/certificates | \
+     gpg --encrypt --recipient admin@example.com \
+     > issuer-backup-encrypted.tar.gz.gpg
+   ```
+
+3. **Use HSM (production)**
+
+   For high-security environments, store private key in Hardware Security Module (HSM).
+
+4. **Audit access**
+
+   Monitor who accesses issuer certificate files:
+   ```bash
+   # Check CAPF audit logs
+   docker compose logs capf | grep issuer
+   ```
+
+### Key Rotation Schedule
+
+Plan regular issuer rotation:
+
+- **Every 5 years**: Recommended for balance
+- **Every 10 years**: Acceptable for most deployments
+- **More frequently**: High-security environments
+
+Set calendar reminders:
+- 1 year before expiry: Begin planning rotation
+- 6 months before expiry: Start testing new issuer
+- 3 months before expiry: Execute rotation
+
+### Backup Strategy
+
+Issuer certificate backups should be:
+
+1. **Encrypted** - Use GPG or similar
+2. **Off-site** - Separate location from production
+3. **Multiple copies** - At least 3 locations
+4. **Tested** - Verify restore works
+5. **Documented** - Clear recovery procedures
+
+## Next Steps
+
+After generating issuer certificate:
+
+1. **Upload CAPF certificate to TVS** - See [Upload Certificates to TVS](/how-to/certificates/upload-to-tvs/)
+2. **Enroll first phone** - See [Enroll Phone with LSC](/how-to/phone/enroll-lsc/)
+3. **Set up certificate monitoring** - See [Renew Certificates](/how-to/certificates/renew-certificates/)
+4. **Configure backups** - See [Backup & Restore](/how-to/installation/backup-restore/)

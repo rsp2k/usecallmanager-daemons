@@ -3,71 +3,116 @@ title: Installation & Setup
 description: Deploy UseCallManager security services with Docker Compose
 ---
 
+import { Card, CardGrid, Aside, Steps, Badge } from '@astrojs/starlight/components';
+
+<Aside type="caution">
+**⚠️ This page has been reorganized**
+
+This content has been split into focused task-oriented guides following the Diátaxis documentation framework:
+
+**Installation:**
+- [Deploy with Docker Compose](/how-to/installation/deploy-docker/) - Step-by-step deployment
+- [Configure Environment](/how-to/installation/configure-environment/) - Environment variables and settings
+- [Backup & Restore](/how-to/installation/backup-restore/) - Data protection and recovery
+
+**Certificate Management:**
+- [Upload Certificates to TVS](/how-to/certificates/upload-to-tvs/) - Server certificate upload
+- [Generate CAPF Issuer Certificate](/how-to/certificates/generate-issuer/) - Create issuer CA
+- [Renew Expiring Certificates](/how-to/certificates/renew-certificates/) - Certificate lifecycle
+
+**Phone Setup:**
+- [Enroll Phone with LSC](/how-to/phone/enroll-lsc/) - Device enrollment process
+
+**Complete Tutorial:**
+- [Your First Phone Deployment](/tutorials/first-deployment/) - End-to-end beginner guide
+
+This page will remain temporarily for reference but will be removed in the future. Please use the focused guides above.
+</Aside>
+
 # Installation & Setup
 
 UseCallManager security services are deployed using Docker Compose for easy setup and management.
 
 ## Prerequisites
 
-- Docker Engine 20.10+
+<Aside type="note">
+Ensure you have the following requirements before starting the installation.
+</Aside>
+
+- Docker Engine <Badge text="20.10+" variant="tip" />
 - Docker Compose V2
 - Domain name with DNS configured (for TLS certificates)
 - Caddy reverse proxy (for HTTPS termination)
 
 ## Quick Start
 
-### 1. Clone the Repository
+<Steps>
 
-```bash
-git clone https://github.com/rsp2k/usecallmanager-daemons.git
-cd usecallmanager-daemons
-```
+1. **Clone the Repository**
 
-### 2. Configure Environment
+   ```bash
+   git clone https://github.com/rsp2k/usecallmanager-daemons.git
+   cd usecallmanager-daemons
+   ```
 
-Create a `.env` file:
+2. **Configure Environment**
 
-```bash
-# Project name (prevents namespace conflicts)
-COMPOSE_PROJECT=usecallmanager
+   Create a `.env` file:
 
-# Domain configuration
-DOMAIN=usecallmanager-services.example.com
+   ```bash
+   # Project name (prevents namespace conflicts)
+   COMPOSE_PROJECT=usecallmanager
 
-# Database (optional, defaults to SQLite)
-# CAPF_DATABASE_URL=postgresql://user:pass@localhost/capf
-# TVS_DATABASE_URL=postgresql://user:pass@localhost/tvs
-```
+   # Domain configuration
+   DOMAIN=usecallmanager-services.example.com
 
-### 3. Start Services
+   # Database (optional, defaults to SQLite)
+   # CAPF_DATABASE_URL=postgresql://user:pass@localhost/capf
+   # TVS_DATABASE_URL=postgresql://user:pass@localhost/tvs
+   ```
 
-```bash
-docker compose up -d
-```
+3. **Start Services**
 
-This starts:
-- **CAPF** - Port 3804 (protocol), Port 8082 (API)
-- **TVS** - Port 8081 (API)
-- **Frontend** - Port 4321 (web UI)
-- **Caddy** - Reverse proxy with automatic HTTPS
+   ```bash
+   docker compose up -d
+   ```
 
-### 4. Verify Services
+   This starts:
+   <CardGrid>
+     <Card title="CAPF" icon="document">
+       - Port <Badge text="3804" variant="note" /> (protocol)
+       - Port <Badge text="8082" variant="tip" /> (API)
+     </Card>
+     <Card title="TVS" icon="approve-check">
+       - Port <Badge text="8081" variant="tip" /> (API)
+     </Card>
+     <Card title="Frontend" icon="laptop">
+       - Port <Badge text="4321" variant="tip" /> (web UI)
+     </Card>
+     <Card title="Caddy" icon="rocket">
+       - Reverse proxy with automatic HTTPS
+     </Card>
+   </CardGrid>
 
-Check health endpoints:
+4. **Verify Services**
 
-```bash
-curl https://$DOMAIN/api/capf/api/v1/health
-curl https://$DOMAIN/api/tvs/api/v1/health
-```
+   Check health endpoints:
 
-Expected response:
-```json
-{
-  "status": "healthy",
-  "version": "4.0.0",
-  "database": "connected"
-}
-```
+   ```bash
+   curl https://$DOMAIN/api/capf/api/v1/health
+   curl https://$DOMAIN/api/tvs/api/v1/health
+   ```
+
+   Expected response:
+   ```json
+   {
+     "status": "healthy",
+     "version": "4.0.0",
+     "database": "connected"
+   }
+   ```
+
+</Steps>
 
 ## Configuration
 
@@ -111,20 +156,30 @@ Services are automatically available at:
 
 ## Initial Setup
 
+<Aside type="tip">
+After starting the services, you'll need to generate the CAPF issuer certificate before enrolling devices.
+</Aside>
+
 ### Generate Issuer Certificate
 
-After starting services, generate the CAPF issuer certificate:
+<Steps>
 
-1. Navigate to **Issuer Certificate** page
+1. Navigate to **Issuer Certificate** page in the web UI
+
 2. Click **Generate New Issuer Certificate**
-3. Configure:
+
+3. Configure the certificate:
    - Common Name: `CAPF-SAST` (or your preferred name)
    - Organization: `UseCallManager`
    - Country: `NZ` (or your country code)
    - Key Type: RSA 2048-bit (recommended)
    - Validity: 10 years
 
-The issuer certificate is used to sign device certificates (LSCs).
+</Steps>
+
+<Aside type="note">
+The issuer certificate is used to sign device certificates (LSCs) and must be generated before you can enroll any phones.
+</Aside>
 
 ## Persistence
 
@@ -140,9 +195,17 @@ docker run --rm -v usecallmanager_capf-data:/data \
   tar czf /backup/capf-backup.tar.gz -C /data .
 ```
 
+<Aside type="caution">
+Regular backups are recommended! Store backups in a secure location separate from your production system.
+</Aside>
+
 ## Troubleshooting
 
 ### Check Logs
+
+<Aside>
+Logs are your first stop when diagnosing issues. Check service-specific logs to narrow down problems.
+</Aside>
 
 ```bash
 # All services
@@ -163,13 +226,21 @@ createdb -U postgres capf
 createdb -U postgres tvs
 ```
 
+<Aside type="danger">
+SQLite is suitable for development and small deployments. For production environments with many devices, use PostgreSQL.
+</Aside>
+
 ### Port Conflicts
 
-If ports 3804, 8081, 8082, or 4321 are in use, modify `docker-compose.yml` to use different ports.
+If ports <Badge text="3804" variant="note" />, <Badge text="8081" variant="tip" />, <Badge text="8082" variant="tip" />, or <Badge text="4321" variant="tip" /> are in use, modify `docker-compose.yml` to use different ports.
 
 ### Certificate Issues
 
 If Caddy cannot obtain certificates, check:
 - DNS is correctly configured
-- Port 443 is accessible from the internet
+- Port <Badge text="443" variant="caution" /> is accessible from the internet
 - Domain ownership verification
+
+<Aside type="tip">
+Use `docker compose logs caddy` to view certificate acquisition status and troubleshoot Let's Encrypt issues.
+</Aside>

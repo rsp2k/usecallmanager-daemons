@@ -1,0 +1,487 @@
+---
+title: Debug TVS Issues
+description: Troubleshoot Trust Verification Service problems with phones
+---
+
+import { Aside, Steps, Badge } from '@astrojs/starlight/components';
+
+## Phone Shows "Security Error"
+
+<Aside type="caution">
+**Symptom**: Phone displays security error message, won't connect to CallManager, or shows unlocked padlock icon.
+</Aside>
+
+This indicates the phone cannot validate server certificates through TVS.
+
+### Diagnostic Steps
+
+<Steps>
+
+1. **Verify TVS Service is Running**
+
+   ```bash
+   docker compose ps tvs
+   ```
+
+   Expected output:
+   ```
+   NAME         SERVICE   STATUS
+   tvs          tvs       Up (healthy)
+   ```
+
+   If not running:
+   ```bash
+   docker compose up -d tvs
+   docker compose logs tvs
+   ```
+
+2. **Check Network Connectivity**
+
+   From phone network, test TVS port:
+   ```bash
+   # From a computer on the phone VLAN
+   nc -zv tvs.example.com 2445
+   ```
+
+   Or use openssl:
+   ```bash
+   openssl s_client -connect tvs.example.com:2445 -showcerts
+   ```
+
+   Should see TLS handshake succeed.
+
+3. **Verify Phone Can Reach TVS**
+
+   Check phone configuration has correct TVS server:
+   - Press **Settings** button on phone
+   - Navigate to **Network Configuration**
+   - Look for TVS server setting
+   - Should match your TVS hostname/IP
+
+4. **Check Certificate is in TVS Database**
+
+   Via Web UI:
+   - Navigate to **Certificates** page
+   - Search for CallManager certificate
+   - Verify roles include `CCM` or `CCM+TFTP`
+
+   Via API:
+   ```bash
+   curl https://your-tvs.example.com/api/tvs/api/v1/certificates
+   ```
+
+   Look for your CallManager certificate in the response.
+
+5. **Review TVS Audit Logs**
+
+   Web UI:
+   - Navigate to **Admin** → **TVS Audit Logs**
+   - Filter by operation: `validate`
+   - Look for recent entries from phone's IP address
+   - Check if validation succeeded or failed
+
+   If you see failed validations, the certificate hash the phone is querying doesn't exist in TVS database.
+
+</Steps>
+
+### Solutions
+
+**Problem: TVS service not running**
+```bash
+docker compose up -d tvs
+# Wait 10 seconds
+docker compose ps tvs
+```
+
+**Problem: Firewall blocking port 2445**
+```bash
+# Add firewall rule allowing phones to reach TVS
+sudo iptables -A INPUT -p tcp --dport 2445 -s 10.0.100.0/24 -j ACCEPT
+```
+
+**Problem: Certificate not uploaded to TVS**
+
+<Steps>
+
+1. Get CallManager certificate:
+   ```bash
+   openssl s_client -connect cucm.example.com:443 \
+     -showcerts </dev/null 2>/dev/null | \
+     openssl x509 -outform PEM > cucm-cert.pem
+   ```
+
+2. Upload to TVS via web UI:
+   - Go to **Certificates** → **Upload Certificate**
+   - Select `cucm-cert.pem`
+   - Choose roles: `CCM` and `TFTP`
+   - Click **Upload**
+
+3. Verify upload:
+   ```bash
+   curl https://your-tvs.example.com/api/tvs/api/v1/certificates
+   ```
+
+4. Reboot phone to clear cache
+
+</Steps>
+
+**Problem: Phone has stale cache**
+- Press **Settings** → **Security Configuration** → **Trust List**
+- Select **Clear Trust List**
+- Phone will reboot and query TVS again
+
+## Phone Not Querying TVS
+
+<Aside type="caution">
+**Symptom**: TVS audit logs show no validation attempts from phone, or phone isn't establishing secure connections.
+</Aside>
+
+The phone either doesn't know about TVS or isn't configured to use it.
+
+### Diagnostic Steps
+
+<Steps>
+
+1. **Check Phone Configuration File**
+
+   Verify phone's config file includes TVS section:
+   ```xml
+   <tvs>
+     <serverName>tvs.example.com</serverName>
+     <port>2445</port>
+     <timeout>10</timeout>
+   </tvs>
+   ```
+
+   File location: `SEP<MAC-ADDRESS>.cnf.xml` on your TFTP server
+
+2. **Verify Security is Enabled**
+
+   Phone config must enable security:
+   ```xml
+   <security>
+     <enabled>true</enabled>
+     <transportType>TLS</transportType>
+   </security>
+   ```
+
+3. **Check Firmware Version**
+
+   - Press **Settings** → **Model Information**
+   - Note firmware version
+   - For 7962G, need SCCP 8.4(1)+ or SIP 9.0(1)+
+
+4. **Enable Phone Debug Mode**
+
+   - Press **Settings** → **Security Configuration**
+   - Enable **Trust Verification Debug**
+   - Reboot phone
+   - Check phone display for TVS debug messages
+
+</Steps>
+
+### Solutions
+
+**Problem: TVS not configured in phone config**
+
+Edit `SEP<MAC>.cnf.xml` and add:
+```xml
+<devicePool>
+  <tvs>
+    <serverName>YOUR-TVS-HOSTNAME</serverName>
+    <port>2445</port>
+    <timeout>10</timeout>
+  </tvs>
+</devicePool>
+```
+
+Reboot phone to reload configuration.
+
+**Problem: Security not enabled**
+
+Add to phone config:
+```xml
+<security>
+  <enabled>true</enabled>
+  <transportType>TLS</transportType>
+</security>
+```
+
+**Problem: Firmware too old**
+
+Upgrade phone firmware:
+1. Download firmware from Cisco
+2. Place on TFTP server
+3. Update `<loadInformation>` in phone config
+4. Reboot phone to trigger upgrade
+
+**Problem: ITL file missing**
+
+Phones need ITL file to bootstrap trust:
+1. Generate ITL file with TVS certificate
+2. Place on TFTP server as `<MAC>.cnf.xml.sgn`
+3. Reboot phone to download ITL
+
+## Intermittent Validation Failures
+
+<Aside type="caution">
+**Symptom**: Phone sometimes shows security errors, inconsistent connection behavior, works after reboot then fails again.
+</Aside>
+
+Usually indicates network instability or TVS service problems.
+
+### Diagnostic Steps
+
+<Steps>
+
+1. **Check TVS Service Health**
+
+   ```bash
+   docker compose logs tvs --tail=100
+   ```
+
+   Look for:
+   - Connection errors
+   - Database errors
+   - TLS handshake failures
+   - Crash/restart messages
+
+2. **Monitor TVS Resource Usage**
+
+   ```bash
+   docker stats tvs
+   ```
+
+   Check if service is running out of memory or CPU.
+
+3. **Test Connection Stability**
+
+   From phone network:
+   ```bash
+   # Test 100 connections
+   for i in {1..100}; do
+     echo | openssl s_client -connect tvs.example.com:2445 2>&1 | \
+       grep "Verify return code"
+   done
+   ```
+
+   Should show consistent results.
+
+4. **Check Network Path**
+
+   ```bash
+   # From phone network
+   traceroute tvs.example.com
+   ping -c 100 tvs.example.com
+   ```
+
+   Look for packet loss or routing issues.
+
+</Steps>
+
+### Solutions
+
+**Problem: TVS service crashing**
+```bash
+# Check logs for crash cause
+docker compose logs tvs --tail=500
+
+# Restart with increased resources
+docker compose down tvs
+# Edit docker-compose.yml to increase memory
+docker compose up -d tvs
+```
+
+**Problem: Database corruption**
+```bash
+# Backup current database
+docker compose exec tvs cp /var/lib/tvs/tvs.sqlite3 /tmp/backup.db
+
+# Verify database integrity
+docker compose exec tvs sqlite3 /var/lib/tvs/tvs.sqlite3 "PRAGMA integrity_check"
+```
+
+If corruption found, restore from backup.
+
+**Problem: Network instability**
+- Check switch/router between phones and TVS
+- Look for intermittent VLAN issues
+- Consider deploying secondary TVS server for redundancy
+
+**Problem: TTL too long**
+
+If you recently updated certificates but phones still cache old ones:
+- Current TTL might be 24+ hours
+- Either wait for cache expiration
+- Or reboot all phones to clear cache
+- Consider shorter TTL (3600 seconds) during certificate transitions
+
+## Certificate Upload Fails
+
+<Aside type="caution">
+**Symptom**: Web UI or API returns error when uploading certificate.
+</Aside>
+
+### Diagnostic Steps
+
+<Steps>
+
+1. **Check Certificate Format**
+
+   ```bash
+   # Verify it's a valid certificate
+   openssl x509 -in certificate.pem -text -noout
+   ```
+
+   Should display certificate details without errors.
+
+2. **Check File Format**
+
+   TVS accepts PEM or DER format:
+   ```bash
+   # Check if PEM (base64 with headers)
+   head -1 certificate.pem
+   # Should see: -----BEGIN CERTIFICATE-----
+
+   # Convert DER to PEM if needed
+   openssl x509 -inform DER -in cert.der -outform PEM -out cert.pem
+   ```
+
+3. **Check TVS Logs**
+
+   ```bash
+   docker compose logs tvs --tail=50
+   ```
+
+   Look for upload error messages.
+
+4. **Verify API Access**
+
+   ```bash
+   # Test API endpoint
+   curl -v https://your-tvs.example.com/api/tvs/api/v1/health
+   ```
+
+   Should return 200 OK with health status.
+
+</Steps>
+
+### Solutions
+
+**Problem: Invalid certificate file**
+- Ensure file contains actual certificate, not private key
+- Verify PEM format with proper headers
+- Check file isn't corrupted
+
+**Problem: Duplicate certificate**
+
+If certificate already exists:
+```bash
+# Delete existing first
+curl -X DELETE \
+  https://your-tvs.example.com/api/tvs/api/v1/certificates/HASH
+
+# Then re-upload
+```
+
+**Problem: API authentication failing**
+
+Check firewall rules allow your IP:
+```bash
+# Add your admin IP to allowed list
+sudo iptables -A INPUT -p tcp --dport 8081 -s YOUR-IP -j ACCEPT
+```
+
+## Monitoring and Prevention
+
+### Regular Health Checks
+
+Set up monitoring to catch issues early:
+
+```bash
+#!/bin/bash
+# health-check.sh
+
+# Check TVS service
+if ! docker compose ps tvs | grep -q "Up"; then
+  echo "CRITICAL: TVS service down"
+  exit 2
+fi
+
+# Check port listening
+if ! nc -zv localhost 2445 2>&1 | grep -q "succeeded"; then
+  echo "CRITICAL: TVS port 2445 not responding"
+  exit 2
+fi
+
+# Check certificate count
+cert_count=$(curl -s http://localhost:8081/api/v1/certificates | jq length)
+if [ "$cert_count" -lt 1 ]; then
+  echo "WARNING: No certificates in TVS database"
+  exit 1
+fi
+
+echo "OK: TVS healthy, $cert_count certificates"
+exit 0
+```
+
+### Audit Log Reviews
+
+Regularly review audit logs for issues:
+
+```bash
+# Check for failed validations
+docker compose exec tvs sqlite3 /var/lib/tvs/tvs.sqlite3 \
+  "SELECT * FROM audit_log WHERE operation='validate' AND success=0 ORDER BY timestamp DESC LIMIT 10;"
+```
+
+Look for patterns:
+- Same phone repeatedly failing
+- Specific certificate hash being rejected
+- Failures at certain times of day
+
+### Certificate Expiration Monitoring
+
+Check certificates approaching expiration:
+
+```bash
+# List certificates expiring in next 30 days
+docker compose exec tvs sqlite3 /var/lib/tvs/tvs.sqlite3 \
+  "SELECT subject_name, datetime(not_after, 'unixepoch')
+   FROM certificates
+   WHERE not_after < strftime('%s', 'now', '+30 days');"
+```
+
+### Best Practices
+
+1. **Keep certificates current** - Upload renewed certificates before old ones expire
+2. **Monitor TVS logs daily** - Catch issues before phones report problems
+3. **Test after changes** - Always verify phone connectivity after TVS changes
+4. **Document certificate roles** - Keep record of which certificates have which roles
+5. **Regular backups** - Backup TVS database weekly
+6. **Redundancy** - Consider multiple TVS servers for high-availability deployments
+
+## Getting More Help
+
+If you've tried all troubleshooting steps and still have issues:
+
+1. **Collect diagnostic bundle:**
+   ```bash
+   # TVS logs
+   docker compose logs tvs > tvs-logs.txt
+
+   # Certificate list
+   curl https://your-tvs.example.com/api/tvs/api/v1/certificates > certs.json
+
+   # Audit log
+   docker compose exec tvs sqlite3 /var/lib/tvs/tvs.sqlite3 \
+     ".dump audit_log" > audit.sql
+   ```
+
+2. **Check phone debug output** - Enable debug mode and capture phone display messages
+
+3. **Verify configuration files** - Share sanitized phone config XML
+
+4. **Document timeline** - Note when issue started, any recent changes
+
+Then consult the [Understanding TVS](/explanation/understanding-tvs/) documentation for deeper insights into how the system works, or review the [TVS Protocol Specification](/reference/protocol/tvs/) for technical details.

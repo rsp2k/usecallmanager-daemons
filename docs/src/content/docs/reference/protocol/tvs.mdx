@@ -1,0 +1,234 @@
+---
+title: TVS Protocol Specification
+description: Technical specification for the Trust Verification Service protocol
+---
+
+import { Card, Badge } from '@astrojs/starlight/components';
+
+## Protocol Parameters
+
+<Card>
+  - **Port**: <Badge text="2445" variant="note" />
+  - **Transport**: TCP with TLS
+  - **TLS Version**: TLS 1.0+ (device dependent)
+  - **Authentication**: Server certificate required
+  - **Client Authentication**: None
+</Card>
+
+## Message Format
+
+### Request Message
+
+Binary message from device to server:
+
+```
+┌────────────────────────────────────────┐
+│ Certificate Hash (SHA-256)             │  32 bytes
+│ ┌──────────────────────────────────┐   │
+│ │ Binary hash of certificate       │   │
+│ └──────────────────────────────────┘   │
+└────────────────────────────────────────┘
+
+Total length: 32 bytes
+Encoding: Binary
+Hash algorithm: SHA-256
+```
+
+### Response Message
+
+Binary message from server to device:
+
+```
+┌────────────────────────────────────────┐
+│ Result Code                            │  1 byte
+│ TTL (Time-To-Live)                     │  4 bytes (big-endian)
+│ Reserved                               │  N bytes (optional)
+└────────────────────────────────────────┘
+
+Minimum length: 5 bytes
+Encoding: Binary
+```
+
+### Result Codes
+
+| Code | Hex Value | Meaning |
+|------|-----------|---------|
+| Certificate Not Found | `0x00` | Hash not in database |
+| Certificate Valid | `0x01` | Hash found and active |
+
+### TTL Field
+
+- **Type**: 32-bit unsigned integer
+- **Encoding**: Big-endian
+- **Unit**: Seconds
+- **Typical Values**:
+  - `86400` (24 hours) - Standard caching
+  - `3600` (1 hour) - Short-term caching
+  - `0` - No caching
+
+## Certificate Roles
+
+Certificates stored in TVS are tagged with one or more roles:
+
+| Role | Purpose | Typical User |
+|------|---------|--------------|
+| `SAST` | System Administrator Security Token | Admin authentication |
+| `CCM` | Cisco Unified Communications Manager | CallManager server |
+| `CCM+TFTP` | Combined CCM and TFTP | Unified service |
+| `TFTP` | TFTP Server | Configuration server |
+| `CAPF` | Certificate Authority Proxy Function | Certificate enrollment |
+| `APP-SERVER` | Application Server | Custom applications |
+| `TVS` | Trust Verification Service | TVS server itself |
+
+## Database Schema
+
+### Certificates Table
+
+```sql
+CREATE TABLE certificates (
+    certificate_hash TEXT PRIMARY KEY,
+    certificate_der BLOB NOT NULL,
+    subject_name TEXT,
+    issuer_name TEXT,
+    serial_number TEXT,
+    not_before INTEGER,
+    not_after INTEGER,
+    roles TEXT,
+    created_at INTEGER,
+    updated_at INTEGER
+);
+```
+
+**Indexes:**
+- Primary key on `certificate_hash` (SHA-256 hex)
+- No additional indexes required
+
+## Configuration File Schema
+
+### Phone Configuration XML
+
+```xml
+<tvs>
+  <serverName>tvs.example.com</serverName>
+  <port>2445</port>
+  <timeout>10</timeout>
+</tvs>
+```
+
+**Fields:**
+- `serverName` - Hostname or IP address of TVS server
+- `port` - TCP port (typically 2445)
+- `timeout` - Connection timeout in seconds
+
+## Supported Firmware
+
+### Cisco 7962G
+
+| Protocol | Minimum Firmware | Notes |
+|----------|------------------|-------|
+| SCCP | 8.4(1) | Full TVS support |
+| SIP | 9.0(1) | Full TVS support |
+
+## Performance Characteristics
+
+### Connection Handling
+
+- **Concurrency**: Unlimited (within system resources)
+- **Connection Type**: One request per connection (no keep-alive)
+- **Connection Pool**: Not applicable
+- **Timeout**: Device-configured (typically 10 seconds)
+
+### Database Performance
+
+- **Lookup Time**: O(1) - Primary key lookup
+- **Storage**: SQLite file-based
+- **Scaling**: Adequate for 1000s of devices
+- **Caching**: No server-side caching required
+
+## Implementation Reference
+
+### Server Pseudocode
+
+```python
+# Accept TLS connection
+connection = accept_tls()
+
+# Read certificate hash (32 bytes fixed)
+cert_hash = connection.read(32)
+
+# Lookup in database
+certificate = database.query(
+    "SELECT * FROM certificates WHERE certificate_hash = ?",
+    cert_hash.hex()
+)
+
+# Build response
+if certificate:
+    result_code = 0x01  # Found
+    ttl = certificate.ttl or 86400
+else:
+    result_code = 0x00  # Not found
+    ttl = 3600
+
+# Send response
+response = bytes([result_code]) + ttl.to_bytes(4, 'big')
+connection.write(response)
+connection.close()
+```
+
+## API Endpoints
+
+### List Certificates
+
+```
+GET /api/v1/certificates
+```
+
+**Response:**
+```json
+[
+  {
+    "certificate_hash": "a1b2c3...",
+    "subject_name": "CN=CallManager",
+    "issuer_name": "CN=Root CA",
+    "roles": ["CCM", "TFTP"],
+    "not_before": 1609459200,
+    "not_after": 1735689600
+  }
+]
+```
+
+### Add Certificate
+
+```
+POST /api/v1/certificates
+Content-Type: multipart/form-data
+```
+
+**Parameters:**
+- `certificate` (file) - PEM or DER formatted certificate
+- `roles` (string) - Comma-separated roles
+
+**Response:**
+```json
+{
+  "certificate_hash": "a1b2c3...",
+  "roles": ["CCM"]
+}
+```
+
+### Delete Certificate
+
+```
+DELETE /api/v1/certificates/{hash}
+```
+
+**Parameters:**
+- `hash` - Certificate SHA-256 hash (hex)
+
+**Response:**
+```json
+{
+  "deleted": true
+}
+```

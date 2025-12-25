@@ -1,0 +1,487 @@
+---
+title: Upload Certificates to TVS
+description: Upload server certificates to Trust Verification Service for phone validation
+---
+
+import { Aside, Steps, Badge, Card, CardGrid } from '@astrojs/starlight/components';
+
+## Why Upload Certificates
+
+Phones use TVS to validate server certificates before establishing secure connections. Before phones can trust your servers, you must upload those server certificates to TVS.
+
+**Common certificates to upload:**
+- CallManager (CUCM) certificates
+- TFTP server certificates
+- CAPF service certificate
+- Application server certificates
+
+<Aside type="tip">
+Without server certificates in TVS, phones will show security errors and refuse to connect, even if they have valid LSC certificates.
+</Aside>
+
+## Prerequisites
+
+- TVS service running
+- Server certificate file (PEM or DER format)
+- Knowledge of certificate's role (CCM, TFTP, CAPF, etc.)
+
+## Upload Methods
+
+You can upload certificates via Web UI or API. Choose the method that fits your workflow.
+
+### Method 1: Web UI (Recommended for Manual Uploads)
+
+<Steps>
+
+1. **Access the Web Interface**
+
+   Navigate to:
+   ```
+   http://localhost:4321
+   ```
+
+   Or your configured domain:
+   ```
+   https://usecallmanager.example.com
+   ```
+
+2. **Navigate to Certificates Page**
+
+   Click **Certificates** in the sidebar navigation.
+
+3. **Click Upload Certificate Button**
+
+   Look for the **Upload Certificate** button at the top of the page.
+
+4. **Select Certificate File**
+
+   - Click **Choose File** or drag-and-drop
+   - Select your certificate file (`.pem`, `.cer`, or `.crt`)
+   - Both PEM and DER formats are supported
+
+5. **Choose Certificate Roles**
+
+   Select one or more roles that apply:
+
+   <CardGrid>
+     <Card title="CCM" icon="seti:config">
+       Cisco Unified Communications Manager - for phone registration
+     </Card>
+     <Card title="TFTP" icon="document">
+       TFTP Server - for configuration downloads
+     </Card>
+     <Card title="CCM+TFTP" icon="seti:config">
+       Combined CCM and TFTP on same server
+     </Card>
+     <Card title="CAPF" icon="approve-check">
+       Certificate Authority Proxy Function - for enrollment
+     </Card>
+     <Card title="TVS" icon="star">
+       Trust Verification Service itself
+     </Card>
+     <Card title="APP-SERVER" icon="rocket">
+       Application servers or custom services
+     </Card>
+   </CardGrid>
+
+6. **Click Upload**
+
+   The certificate is validated and stored in the TVS database.
+
+7. **Verify Upload**
+
+   The certificate should appear in the certificates list with:
+   - Subject name
+   - Issuer
+   - Assigned roles
+   - Expiration date
+
+</Steps>
+
+### Method 2: API (Recommended for Automation)
+
+Upload via curl for scripting and automation:
+
+```bash
+curl -X POST https://usecallmanager.example.com/api/tvs/api/v1/certificates \
+  -F "certificate=@/path/to/certificate.pem" \
+  -F "roles=CCM,TFTP"
+```
+
+**Response:**
+```json
+{
+  "certificate_hash": "a1b2c3d4e5f6...",
+  "subject_name": "CN=CallManager",
+  "issuer_name": "CN=Enterprise CA",
+  "roles": ["CCM", "TFTP"],
+  "not_before": 1609459200,
+  "not_after": 1735689600
+}
+```
+
+## Obtaining Server Certificates
+
+### From CallManager (CUCM)
+
+<Steps>
+
+1. **Connect with OpenSSL**
+
+   ```bash
+   openssl s_client -connect cucm.example.com:443 -showcerts \
+     </dev/null 2>/dev/null | \
+     openssl x509 -outform PEM > cucm-cert.pem
+   ```
+
+2. **Verify certificate**
+
+   ```bash
+   openssl x509 -in cucm-cert.pem -text -noout
+   ```
+
+   Check the Subject and Issuer match your CallManager.
+
+3. **Upload to TVS** (see methods above)
+
+</Steps>
+
+### From TFTP Server
+
+If TFTP server uses HTTPS for downloads:
+
+```bash
+# Get TFTP server certificate
+openssl s_client -connect tftp.example.com:443 -showcerts \
+  </dev/null 2>/dev/null | \
+  openssl x509 -outform PEM > tftp-cert.pem
+
+# Upload to TVS
+curl -X POST http://localhost:8081/api/v1/certificates \
+  -F "certificate=@tftp-cert.pem" \
+  -F "roles=TFTP"
+```
+
+### From CAPF Service
+
+The CAPF service itself needs to be trusted by phones:
+
+```bash
+# Get CAPF certificate
+openssl s_client -connect capf.example.com:3804 -showcerts \
+  </dev/null 2>/dev/null | \
+  openssl x509 -outform PEM > capf-cert.pem
+
+# Upload to TVS
+curl -X POST http://localhost:8081/api/v1/certificates \
+  -F "certificate=@capf-cert.pem" \
+  -F "roles=CAPF"
+```
+
+### From File on CallManager
+
+If you have direct access to CallManager:
+
+```bash
+# Export from CallManager via admin UI
+# OS Administration → Security → Certificate Management
+# Download the certificate
+
+# Or via CLI
+utils ctl get-clusters
+
+# Upload to TVS
+curl -X POST http://localhost:8081/api/v1/certificates \
+  -F "certificate=@CallManager.pem" \
+  -F "roles=CCM"
+```
+
+## Certificate Role Selection
+
+Choose roles based on what the certificate is used for:
+
+| Role | When to Use | Example |
+|------|-------------|---------|
+| **CCM** | Certificate is for CallManager signaling | CUCM cluster nodes |
+| **TFTP** | Certificate is for TFTP configuration downloads | Standalone TFTP server |
+| **CCM+TFTP** | Same server handles both CCM and TFTP | Unified CUCM deployment |
+| **CAPF** | Certificate is for CAPF enrollment service | This UseCallManager CAPF |
+| **TVS** | Certificate is for TVS service itself | This UseCallManager TVS |
+| **APP-SERVER** | Certificate is for application servers | Unity Connection, Presence |
+| **SAST** | Certificate is for admin authentication | Administrator tokens |
+
+<Aside type="tip">
+You can assign multiple roles to a single certificate if the server performs multiple functions.
+</Aside>
+
+## Common Scenarios
+
+### Scenario 1: New CallManager Deployment
+
+<Steps>
+
+1. **Obtain CallManager certificate**
+
+   ```bash
+   openssl s_client -connect cucm.example.com:443 -showcerts \
+     </dev/null 2>/dev/null | \
+     openssl x509 -outform PEM > cucm.pem
+   ```
+
+2. **Upload with CCM role**
+
+   ```bash
+   curl -X POST http://localhost:8081/api/v1/certificates \
+     -F "certificate=@cucm.pem" \
+     -F "roles=CCM"
+   ```
+
+3. **Verify phones can now validate**
+
+   - Reboot a test phone
+   - Should show locked padlock icon
+   - No security errors
+
+</Steps>
+
+### Scenario 2: CallManager Certificate Renewal
+
+When CallManager gets a new certificate:
+
+<Steps>
+
+1. **Upload new certificate to TVS**
+
+   Both old and new certificates can coexist during transition.
+
+   ```bash
+   curl -X POST http://localhost:8081/api/v1/certificates \
+     -F "certificate=@cucm-new.pem" \
+     -F "roles=CCM"
+   ```
+
+2. **Switch CallManager to new certificate**
+
+   Update CallManager to use the new certificate.
+
+3. **Monitor phone connections**
+
+   Phones will validate against both certificates until cache expires.
+
+4. **Remove old certificate (optional)**
+
+   After transition is complete (24+ hours):
+   ```bash
+   curl -X DELETE http://localhost:8081/api/v1/certificates/OLD_HASH
+   ```
+
+</Steps>
+
+### Scenario 3: Multiple CallManager Nodes in Cluster
+
+Upload certificate for each node:
+
+```bash
+# Node 1
+openssl s_client -connect cucm1.example.com:443 -showcerts \
+  </dev/null 2>/dev/null | openssl x509 -outform PEM > cucm1.pem
+curl -X POST http://localhost:8081/api/v1/certificates \
+  -F "certificate=@cucm1.pem" -F "roles=CCM"
+
+# Node 2
+openssl s_client -connect cucm2.example.com:443 -showcerts \
+  </dev/null 2>/dev/null | openssl x509 -outform PEM > cucm2.pem
+curl -X POST http://localhost:8081/api/v1/certificates \
+  -F "certificate=@cucm2.pem" -F "roles=CCM"
+
+# Repeat for all nodes
+```
+
+## Verification
+
+After uploading certificates, verify they're accessible:
+
+### Via Web UI
+
+1. Navigate to **Certificates** page
+2. Look for your uploaded certificate in the list
+3. Check roles are correct
+4. Verify expiration date
+
+### Via API
+
+```bash
+# List all certificates
+curl http://localhost:8081/api/v1/certificates
+
+# Search for specific certificate
+curl http://localhost:8081/api/v1/certificates | \
+  jq '.[] | select(.subject_name | contains("CallManager"))'
+```
+
+### Test with Phone
+
+<Steps>
+
+1. Configure phone to use TVS (in phone config XML):
+   ```xml
+   <tvs>
+     <serverName>tvs.example.com</serverName>
+     <port>2445</port>
+   </tvs>
+   ```
+
+2. Reboot phone
+
+3. Phone should validate CallManager certificate via TVS
+
+4. Check phone display for locked padlock icon
+
+5. Review TVS audit logs:
+   ```bash
+   # Via Web UI: Admin → TVS Audit Logs
+   # Via API:
+   curl http://localhost:8081/api/v1/audit-logs?operation=validate
+   ```
+
+</Steps>
+
+## Troubleshooting
+
+### Upload Fails: "Invalid Certificate Format"
+
+**Problem**: Certificate file is not in correct format.
+
+**Solutions:**
+
+```bash
+# Check if it's a valid certificate
+openssl x509 -in certificate.pem -text -noout
+
+# Convert DER to PEM if needed
+openssl x509 -inform DER -in cert.der -outform PEM -out cert.pem
+
+# Remove any extra text around certificate
+# Should start with: -----BEGIN CERTIFICATE-----
+# Should end with: -----END CERTIFICATE-----
+```
+
+### Upload Succeeds But Phone Still Shows Error
+
+**Problem**: Certificate uploaded but phone can't validate.
+
+**Diagnostic Steps:**
+
+<Steps>
+
+1. **Check phone is querying TVS**
+
+   Review TVS audit logs for validation attempts from phone IP.
+
+2. **Verify phone config has TVS settings**
+
+   Phone config must include `<tvs>` section.
+
+3. **Check certificate roles match**
+
+   If connecting to CallManager, certificate must have `CCM` role.
+
+4. **Clear phone certificate cache**
+
+   Reboot phone to clear cached validation results.
+
+</Steps>
+
+### Wrong Certificate Uploaded
+
+**Problem**: Uploaded wrong certificate file.
+
+**Solution:**
+
+<Steps>
+
+1. **Get certificate hash**
+
+   Find the certificate in Web UI or API response.
+
+2. **Delete incorrect certificate**
+
+   ```bash
+   curl -X DELETE http://localhost:8081/api/v1/certificates/HASH
+   ```
+
+3. **Upload correct certificate**
+
+   Follow upload procedure with correct file.
+
+</Steps>
+
+### Certificate Expired
+
+**Problem**: Uploaded certificate is already expired.
+
+**Solution:**
+
+Renew the server certificate first, then upload the new one:
+
+<Steps>
+
+1. Renew certificate on source server (CallManager, etc.)
+2. Obtain renewed certificate
+3. Upload to TVS
+4. Remove old expired certificate
+
+</Steps>
+
+## Bulk Upload Script
+
+For uploading multiple certificates:
+
+```bash
+#!/bin/bash
+# bulk-upload-certs.sh
+
+TVS_URL="http://localhost:8081/api/v1/certificates"
+
+# Array of certificates to upload
+# Format: "filename:role1,role2"
+CERTS=(
+  "cucm1.pem:CCM"
+  "cucm2.pem:CCM"
+  "tftp.pem:TFTP"
+  "capf.pem:CAPF"
+)
+
+for cert_info in "${CERTS[@]}"; do
+  filename="${cert_info%:*}"
+  roles="${cert_info#*:}"
+
+  echo "Uploading $filename with roles: $roles"
+
+  curl -X POST "$TVS_URL" \
+    -F "certificate=@$filename" \
+    -F "roles=$roles"
+
+  echo ""
+done
+
+echo "Upload complete. Verifying..."
+curl "$TVS_URL" | jq '.[] | {subject: .subject_name, roles: .roles}'
+```
+
+## Best Practices
+
+1. **Upload before phone deployment** - Ensures phones can validate immediately
+2. **Document certificate purposes** - Keep record of which roles apply to each
+3. **Set reminders for renewal** - Upload renewed certificates before expiry
+4. **Test with single phone first** - Verify validation before deploying to all phones
+5. **Keep certificates backed up** - Store copies in secure location
+6. **Review audit logs regularly** - Monitor which phones are validating certificates
+
+## Next Steps
+
+After uploading certificates to TVS:
+
+1. **Configure phones to use TVS** - See [Configure Cisco 7962G](/how-to/phone/configure-7962g/)
+2. **Generate CAPF issuer** - See [Generate Issuer Certificate](/how-to/certificates/generate-issuer/)
+3. **Enroll phones with LSC** - See [Enroll Phone with LSC](/how-to/phone/enroll-lsc/)
