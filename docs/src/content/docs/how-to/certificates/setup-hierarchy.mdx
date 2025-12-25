@@ -1,0 +1,615 @@
+---
+title: Set Up Certificate Hierarchy
+description: Create a multi-level CA structure with root and intermediate certificates for production PKI
+---
+
+import { Aside, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+
+## Overview
+
+This guide shows how to set up a proper two-level certificate hierarchy:
+
+```
+Root CA (Offline, 20-year validity)
+    ↓ signs
+Intermediate CA (CAPF Issuer, 5-year validity)
+    ↓ signs
+Device LSCs (1-year validity)
+```
+
+<Aside type="tip">
+**Why two levels?** The root CA private key stays offline and secure. If the intermediate is compromised, you can rotate it without re-trusting the root on all systems.
+</Aside>
+
+## Prerequisites
+
+- OpenSSL installed
+- Secure system for root CA generation (preferably offline)
+- UseCallManager CAPF service running
+- Understanding of [Certificate Hierarchy concepts](/explanation/certificate-hierarchy/)
+
+## Step 1: Generate Root CA
+
+The root CA is your trust anchor. Generate it on a secure, preferably offline system.
+
+### Create Root CA Directory Structure
+
+```bash
+# Create directory for root CA
+mkdir -p ~/usecallmanager-root-ca/{certs,private,csr}
+cd ~/usecallmanager-root-ca
+
+# Secure private key directory
+chmod 700 private
+```
+
+### Generate Root CA Private Key
+
+```bash
+# Generate 4096-bit RSA key (strong security for long-lived root)
+openssl genrsa -aes256 -out private/root-ca.key 4096
+
+# You'll be prompted for a passphrase - SAVE THIS SECURELY!
+# This passphrase protects your root CA private key
+```
+
+<Aside type="caution">
+**Passphrase security:** The root CA private key passphrase is critical. Store it in a password manager, physical vault, or split using Shamir's secret sharing. Loss = cannot issue new intermediates. Compromise = entire PKI is untrusted.
+</Aside>
+
+### Create Root CA Certificate
+
+```bash
+# Generate self-signed root CA certificate
+openssl req -new -x509 -days 7300 -key private/root-ca.key \
+  -out certs/root-ca.pem \
+  -subj "/C=NZ/O=UseCallManager/CN=UseCallManager Root CA"
+
+# 7300 days = 20 years validity
+```
+
+**Customize the subject:**
+- `C=NZ` - Your country code
+- `O=UseCallManager` - Your organization name
+- `CN=UseCallManager Root CA` - Descriptive common name
+
+### Verify Root CA Certificate
+
+```bash
+# View certificate details
+openssl x509 -in certs/root-ca.pem -text -noout
+
+# Check for:
+# - Validity: 20 years
+# - Issuer equals Subject (self-signed)
+# - Basic Constraints: CA:TRUE
+# - Key Usage: Certificate Sign, CRL Sign
+```
+
+### Secure Root CA
+
+<Steps>
+
+1. **Backup the root CA**
+
+   ```bash
+   # Create encrypted backup
+   tar -czf root-ca-backup.tar.gz private/ certs/
+   gpg --symmetric --cipher-algo AES256 root-ca-backup.tar.gz
+
+   # Store encrypted backup on:
+   # - Encrypted USB drive (in physical vault)
+   # - Offline backup system
+   # - Multiple geographic locations
+   ```
+
+2. **Document the passphrase**
+
+   Store root CA key passphrase separately from the key itself:
+   - Password manager with 2FA
+   - Physical safe (different location than key backup)
+   - Split among multiple trusted individuals
+
+3. **Remove from online system** (recommended)
+
+   ```bash
+   # After completing intermediate setup:
+   # - Copy root CA backup to offline storage
+   # - Delete from online system
+   # - Only bring online when signing new intermediates
+   ```
+
+</Steps>
+
+## Step 2: Generate Intermediate CA
+
+The intermediate CA will be used by CAPF to sign device certificates.
+
+### Create Intermediate CA Directory
+
+```bash
+# On the system where CAPF runs
+mkdir -p ~/usecallmanager-intermediate-ca/{certs,private,csr}
+cd ~/usecallmanager-intermediate-ca
+
+chmod 700 private
+```
+
+### Generate Intermediate Private Key
+
+```bash
+# Generate 2048-bit RSA key (adequate for intermediate, faster operations)
+openssl genrsa -aes256 -out private/intermediate-ca.key 2048
+
+# Passphrase protects intermediate key
+# This will be used by CAPF, so passphrase handling must be automated
+```
+
+<Aside type="note">
+**CAPF integration:** The intermediate key will be stored in CAPF's database or certificate directory. Consider using a passphrase that can be automated (environment variable, secrets manager) or generating without passphrase if file permissions provide adequate protection.
+</Aside>
+
+### Create Certificate Signing Request (CSR)
+
+```bash
+# Generate CSR for intermediate CA
+openssl req -new -key private/intermediate-ca.key \
+  -out csr/intermediate-ca.csr \
+  -subj "/C=NZ/O=UseCallManager/CN=UseCallManager CAPF Issuer"
+```
+
+### Sign Intermediate CSR with Root CA
+
+**Transfer CSR to root CA system:**
+
+```bash
+# Copy CSR to root CA system (USB drive, secure file transfer, etc.)
+cp csr/intermediate-ca.csr /path/to/transfer/
+```
+
+**On root CA system, create signing configuration:**
+
+```bash
+cd ~/usecallmanager-root-ca
+
+# Create v3 extensions file for CA signing
+cat > intermediate-ca-extensions.cnf <<EOF
+basicConstraints = critical,CA:TRUE,pathlen:0
+keyUsage = critical,keyCertSign,cRLSign
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid:always,issuer
+EOF
+```
+
+<Aside type="tip">
+**pathlen:0** means this intermediate can sign end-entity certificates but cannot sign other intermediate CAs. This limits the depth of your hierarchy to two levels.
+</Aside>
+
+**Sign the intermediate certificate:**
+
+```bash
+# Sign intermediate CSR with root CA
+openssl x509 -req -in /path/to/intermediate-ca.csr \
+  -CA certs/root-ca.pem \
+  -CAkey private/root-ca.key \
+  -CAcreateserial \
+  -out certs/intermediate-ca.pem \
+  -days 1825 \
+  -extfile intermediate-ca-extensions.cnf
+
+# 1825 days = 5 years validity
+# You'll be prompted for root CA key passphrase
+```
+
+### Verify Intermediate Certificate
+
+```bash
+# View intermediate certificate
+openssl x509 -in certs/intermediate-ca.pem -text -noout
+
+# Check for:
+# - Issuer: UseCallManager Root CA (signed by root)
+# - Subject: UseCallManager CAPF Issuer
+# - Basic Constraints: CA:TRUE, pathlen:0
+# - Validity: 5 years
+```
+
+**Verify the chain:**
+
+```bash
+# Verify intermediate chains to root
+openssl verify -CAfile certs/root-ca.pem certs/intermediate-ca.pem
+
+# Should output:
+# certs/intermediate-ca.pem: OK
+```
+
+## Step 3: Deploy to CAPF
+
+### Option A: Via Web Interface
+
+<Steps>
+
+1. **Navigate to CAPF Admin**
+
+   Go to: `http://localhost:8082` → **Admin** → **Issuer Certificate**
+
+2. **Upload Intermediate Certificate**
+
+   - Click **Upload Existing Certificate**
+   - Select `intermediate-ca.pem`
+   - Select `intermediate-ca.key`
+   - Enter key passphrase (if encrypted)
+   - Click **Save**
+
+3. **Verify Installation**
+
+   - Certificate details should display
+   - Subject shows: `CN=UseCallManager CAPF Issuer`
+   - Issuer shows: `CN=UseCallManager Root CA`
+
+</Steps>
+
+### Option B: Via API
+
+```bash
+# Upload intermediate CA to CAPF
+curl -X POST http://localhost:8082/api/v1/issuer-certificate/import \
+  -F "certificate=@certs/intermediate-ca.pem" \
+  -F "private_key=@private/intermediate-ca.key" \
+  -F "passphrase=YourKeyPassphrase"
+
+# Verify
+curl http://localhost:8082/api/v1/issuer-certificate | jq '.'
+```
+
+### Option C: Manual File Deployment
+
+```bash
+# Copy intermediate CA to CAPF certificate directory
+sudo cp certs/intermediate-ca.pem /var/lib/capf/certificates/issuer.pem
+sudo cp private/intermediate-ca.key /var/lib/capf/certificates/issuer.key
+
+# Set secure permissions
+sudo chown capf:capf /var/lib/capf/certificates/issuer.*
+sudo chmod 600 /var/lib/capf/certificates/issuer.key
+sudo chmod 644 /var/lib/capf/certificates/issuer.pem
+
+# Restart CAPF service
+docker compose restart capf
+```
+
+## Step 4: Configure Certificate Chain
+
+CAPF must send the complete certificate chain when issuing device certificates.
+
+### Create Chain Bundle
+
+```bash
+# Create certificate chain file (device cert + intermediate)
+# This will be used by CAPF when issuing certificates
+
+cat certs/intermediate-ca.pem > certs/ca-chain.pem
+
+# Note: Root CA is NOT included in the chain bundle
+# Root CA must be pre-installed in client trust stores
+```
+
+### Configure CAPF to Use Chain
+
+**Update CAPF configuration** (example with environment variable):
+
+```bash
+# In .env file or docker-compose.yml
+CAPF_CERT_CHAIN=/var/lib/capf/certificates/ca-chain.pem
+CAPF_CERT_FILE=/var/lib/capf/certificates/issuer.pem
+CAPF_KEY_FILE=/var/lib/capf/certificates/issuer.key
+```
+
+**CAPF will now issue certificates with chain:**
+```
+[Device Certificate]
+  ↓
+[Intermediate CA Certificate]
+```
+
+## Step 5: Distribute Root CA to Trust Stores
+
+Now that your hierarchy is set up, install the **root CA** (not the intermediate) in system trust stores.
+
+<Aside type="caution">
+**Important:** Only install the **root CA** in trust stores. The intermediate CA should be included in the certificate chain, not trusted directly.
+</Aside>
+
+### Trust the Root CA
+
+Follow the platform-specific instructions from [Trust CAPF Issuer Certificate](/how-to/certificates/trust-issuer/), but use your **root CA** certificate (`root-ca.pem`) instead:
+
+<Tabs>
+<TabItem label="Windows">
+
+```powershell
+# Import ROOT CA to Windows trust store
+Import-Certificate -FilePath "C:\path\to\root-ca.pem" `
+  -CertStoreLocation Cert:\LocalMachine\Root
+```
+
+</TabItem>
+
+<TabItem label="Linux (Ubuntu/Debian)">
+
+```bash
+# Copy root CA to system directory
+sudo cp root-ca.pem /usr/local/share/ca-certificates/usecallmanager-root.crt
+
+# Update trust store
+sudo update-ca-certificates
+```
+
+</TabItem>
+
+<TabItem label="Firefox">
+
+```bash
+# Import root CA to Firefox
+# Settings → Privacy & Security → Certificates → View Certificates
+# → Authorities → Import → Select root-ca.pem
+# → Check "Trust this CA to identify websites"
+```
+
+</TabItem>
+</Tabs>
+
+**Verification:**
+
+```bash
+# Test that chain validates
+openssl verify -CAfile root-ca.pem -untrusted intermediate-ca.pem device-cert.pem
+
+# Should show: device-cert.pem: OK
+```
+
+## Step 6: Issue Device Certificates
+
+Now CAPF can issue device certificates that chain to your trusted root.
+
+### Enroll a Test Phone
+
+```bash
+# Schedule device for enrollment via API
+curl -X POST http://localhost:8082/api/v1/devices \
+  -H "Content-Type: application/json" \
+  -d '{
+    "device_name": "SEP001122334455",
+    "operation": "install",
+    "authentication": "by password",
+    "password": "TestEnroll123",
+    "key_size": 2048,
+    "validity_days": 365
+  }'
+
+# Trigger enrollment on phone
+# Phone will receive certificate signed by intermediate
+```
+
+### Verify Certificate Chain
+
+After enrollment, check the device certificate:
+
+```bash
+# Get device certificate
+curl http://localhost:8082/api/v1/devices/SEP001122334455 | \
+  jq -r '.certificate' > device-cert.pem
+
+# Verify chain
+openssl verify -CAfile root-ca.pem -untrusted intermediate-ca.pem device-cert.pem
+
+# Expected output:
+# device-cert.pem: OK
+
+# View certificate details
+openssl x509 -in device-cert.pem -text -noout | grep -A 2 "Issuer:"
+
+# Should show:
+# Issuer: CN=UseCallManager CAPF Issuer, O=UseCallManager, C=NZ
+```
+
+## Understanding the Chain
+
+When a phone connects, this is what happens:
+
+```
+1. Phone presents:
+   ┌─────────────────────────────┐
+   │ Device Certificate          │
+   │ (Subject: SEP001122334455)  │
+   │ (Signed by: CAPF Issuer)    │
+   └─────────────────────────────┘
+   ┌─────────────────────────────┐
+   │ Intermediate CA Cert        │
+   │ (Subject: CAPF Issuer)      │
+   │ (Signed by: Root CA)        │
+   └─────────────────────────────┘
+
+2. CallManager checks chain:
+   - Is device cert signed by intermediate? ✓
+   - Is intermediate cert signed by root? ✓
+   - Is root CA trusted? ✓ (in trust store)
+   - All certs valid (not expired)? ✓
+
+3. Connection allowed!
+```
+
+<Aside type="note">
+**Root CA is NOT sent:** The root CA is already installed in the trust store, so it doesn't need to be included in the chain. Only the intermediate CA is sent along with the device certificate.
+</Aside>
+
+## Certificate Rotation
+
+### Rotating the Intermediate CA
+
+When the intermediate approaches expiration:
+
+<Steps>
+
+1. **Generate new intermediate CSR** (on CAPF system)
+
+   ```bash
+   openssl genrsa -aes256 -out private/intermediate-ca-2.key 2048
+   openssl req -new -key private/intermediate-ca-2.key \
+     -out csr/intermediate-ca-2.csr \
+     -subj "/C=NZ/O=UseCallManager/CN=UseCallManager CAPF Issuer 2"
+   ```
+
+2. **Sign with root CA** (on root CA system)
+
+   ```bash
+   # Bring root CA online temporarily
+   openssl x509 -req -in intermediate-ca-2.csr \
+     -CA certs/root-ca.pem \
+     -CAkey private/root-ca.key \
+     -CAcreateserial \
+     -out certs/intermediate-ca-2.pem \
+     -days 1825 \
+     -extfile intermediate-ca-extensions.cnf
+
+   # Return root CA to offline storage
+   ```
+
+3. **Deploy new intermediate to CAPF**
+
+   ```bash
+   # Upload via API or web interface
+   curl -X POST http://localhost:8082/api/v1/issuer-certificate/import \
+     -F "certificate=@certs/intermediate-ca-2.pem" \
+     -F "private_key=@private/intermediate-ca-2.key"
+   ```
+
+4. **Re-enroll devices** (before old intermediate expires)
+
+   See: [Renew Expiring Certificates](/how-to/certificates/renew-certificates/)
+
+</Steps>
+
+**Important:** The root CA remains trusted throughout. No need to update trust stores on any systems!
+
+### Rotating the Root CA
+
+Root rotation is a major operation, required only when:
+- Root CA expires (20+ years)
+- Root CA compromised (security incident)
+- Cryptographic algorithm becomes obsolete
+
+**Process:**
+1. Generate new root CA
+2. Sign new intermediate with new root
+3. Distribute new root to ALL trust stores
+4. Re-issue ALL device certificates
+5. Remove old root from trust stores (after transition period)
+
+**Timeline:** Plan 6-12 months for complete root CA rotation.
+
+## Troubleshooting
+
+### Chain Validation Fails
+
+**Error:** `unable to get local issuer certificate`
+
+**Cause:** Missing intermediate CA in chain
+
+**Solution:**
+
+```bash
+# Verify CAPF is sending intermediate
+openssl s_client -connect localhost:3804 -showcerts
+
+# Should show TWO certificates:
+# 1. Device certificate
+# 2. Intermediate CA certificate
+```
+
+### Root Not Trusted
+
+**Error:** `self signed certificate in certificate chain`
+
+**Cause:** Root CA not installed in trust store
+
+**Solution:**
+
+```bash
+# Verify root CA in trust store (Linux)
+grep -r "UseCallManager Root CA" /etc/ssl/certs/
+
+# If not found, install following platform-specific steps
+```
+
+### Intermediate in Trust Store
+
+**Problem:** Accidentally installed intermediate instead of root
+
+**Issue:** Works now but wrong trust model
+
+**Fix:**
+
+```bash
+# Remove intermediate from trust store
+# Add root CA to trust store instead
+
+# Windows
+certmgr.msc → Remove intermediate, Add root
+
+# Linux
+sudo rm /usr/local/share/ca-certificates/intermediate-ca.crt
+sudo cp root-ca.pem /usr/local/share/ca-certificates/root-ca.crt
+sudo update-ca-certificates
+```
+
+## Security Best Practices
+
+### Root CA Management
+
+✅ **Do:**
+- Generate on offline, air-gapped system
+- Use strong passphrase (25+ characters)
+- Store encrypted backups in multiple geographic locations
+- Document every use in audit log
+- Limit access to 2-3 trusted administrators
+- Use HSM for high-security environments
+
+❌ **Don't:**
+- Keep root CA online
+- Use weak or no passphrase
+- Store passphrase with key
+- Allow single-person access
+- Generate on production systems
+
+### Intermediate CA Management
+
+✅ **Do:**
+- Monitor expiration dates
+- Plan rotation 6 months before expiry
+- Encrypt private key at rest
+- Backup regularly
+- Log all certificate issuance
+- Implement rate limiting
+
+❌ **Don't:**
+- Use same key for multiple intermediates
+- Store unencrypted in version control
+- Ignore expiration warnings
+- Share across multiple organizations
+
+## Next Steps
+
+After setting up your certificate hierarchy:
+
+1. **Test the chain** - Enroll test device, verify validation
+2. **Document procedures** - Root access, intermediate rotation
+3. **Set up monitoring** - Expiration alerts for all levels
+4. **Train team** - Ensure multiple people understand operations
+5. **Plan rotations** - Calendar reminders for intermediate renewal
+
+For ongoing operations, see:
+- [Enroll Phone with LSC](/how-to/phone/enroll-lsc/)
+- [Renew Expiring Certificates](/how-to/certificates/renew-certificates/)
+- [Trust CAPF Issuer Certificate](/how-to/certificates/trust-issuer/)

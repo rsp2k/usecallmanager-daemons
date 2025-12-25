@@ -1,0 +1,356 @@
+---
+title: Certificate Hierarchy & Trust Chains
+description: Understanding certificate hierarchies, trust chains, and why multi-level CA structures matter
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+## What Is a Certificate Hierarchy?
+
+A certificate hierarchy is a chain of trust where certificates sign other certificates, creating parent-child relationships:
+
+```
+Root CA (Grandparent)
+    ↓ signs
+Intermediate CA (Parent)
+    ↓ signs
+Device Certificate (Child)
+```
+
+Each level serves a specific security and operational purpose.
+
+## Why Use a Hierarchy?
+
+### Single-Level Structure (Simple but Risky)
+
+In a flat structure, the CAPF issuer directly signs all device certificates:
+
+```
+CAPF Issuer Certificate
+    ↓ signs
+Device LSC (Phone 1)
+Device LSC (Phone 2)
+Device LSC (Phone 3)
+...
+```
+
+**Problems:**
+- ❌ Issuer private key used frequently (higher exposure risk)
+- ❌ Compromised issuer = re-trust on ALL systems
+- ❌ Issuer rotation = re-trust on ALL systems
+- ❌ No separation of duties
+- ❌ Same key online 24/7 signing certificates
+
+### Multi-Level Structure (Secure and Flexible)
+
+With proper hierarchy:
+
+```
+Root CA (Offline, 20-year validity)
+    ↓ signs (once)
+Intermediate CA (Online, 5-year validity)
+    ↓ signs (daily)
+Device LSCs (1-year validity)
+```
+
+**Benefits:**
+- ✅ Root CA private key kept offline (air-gapped, HSM, or vault)
+- ✅ Root CA used rarely (only to sign intermediates)
+- ✅ Intermediate compromise = rotate intermediate, root stays trusted
+- ✅ Intermediate rotation = no system-wide re-trust needed
+- ✅ Separation of duties (root admin vs. operations)
+- ✅ Industry best practice for production PKI
+
+## Certificate Chain Components
+
+### Root CA (Trust Anchor)
+
+**Purpose:** Ultimate trust authority
+
+**Characteristics:**
+- Self-signed (subject equals issuer)
+- Very long validity (10-20 years)
+- Private key stored offline
+- Used only to sign intermediate CAs
+- Installed in system trust stores
+
+**Example:**
+```
+Subject: CN=UseCallManager Root CA, O=Your Organization, C=NZ
+Issuer: CN=UseCallManager Root CA, O=Your Organization, C=NZ (self-signed)
+Validity: 20 years
+Key Usage: Certificate Sign, CRL Sign
+```
+
+### Intermediate CA (Operational CA)
+
+**Purpose:** Day-to-day certificate issuance
+
+**Characteristics:**
+- Signed by root CA
+- Medium validity (2-10 years)
+- Private key can be online (in CAPF service)
+- Signs device certificates
+- Can be rotated without affecting root trust
+
+**Example:**
+```
+Subject: CN=UseCallManager CAPF Issuer, O=Your Organization, C=NZ
+Issuer: CN=UseCallManager Root CA, O=Your Organization, C=NZ
+Validity: 5 years
+Key Usage: Certificate Sign, CRL Sign
+```
+
+### Device Certificate (End-Entity)
+
+**Purpose:** Phone authentication identity
+
+**Characteristics:**
+- Signed by intermediate CA
+- Short validity (1-2 years)
+- Private key stored on device
+- Cannot sign other certificates
+- Renewable before expiration
+
+**Example:**
+```
+Subject: CN=SEP001122334455
+Issuer: CN=UseCallManager CAPF Issuer, O=Your Organization, C=NZ
+Validity: 1 year
+Key Usage: Digital Signature, Key Encipherment
+```
+
+## Trust Chain Validation
+
+When a phone connects with its LSC, the system validates the chain:
+
+```
+Step 1: Phone presents device certificate
+        ↓
+Step 2: System checks: "Who signed this?"
+        → Signed by: UseCallManager CAPF Issuer
+        ↓
+Step 3: System checks: "Do I trust that issuer?"
+        → Issuer signed by: UseCallManager Root CA
+        ↓
+Step 4: System checks: "Do I trust that root?"
+        → Root CA found in system trust store ✓
+        ↓
+Step 5: Trust established!
+```
+
+<Aside type="tip">
+**Chain validation requires the complete path:** Clients must have access to all intermediate certificates to build the chain from device cert to trusted root.
+</Aside>
+
+## How Systems Trust the Chain
+
+### What Gets Installed Where
+
+| Certificate | Install Location | Why |
+|-------------|------------------|-----|
+| Root CA | System trust stores | Trust anchor - everything chains to this |
+| Intermediate CA | Certificate chain bundles | Needed for validation, but not "trusted" directly |
+| Device certificates | Devices (phones) | Identification, signed by intermediate |
+
+### Trust vs. Chain Certificates
+
+**Trusted Certificates (in trust store):**
+- Root CAs only
+- User explicitly trusts these
+- Added to: Windows certmgr, Linux `/etc/ssl/certs`, Firefox authorities
+
+**Chain Certificates (provided during TLS):**
+- Intermediate CAs
+- Sent with device certificate during handshake
+- Not in trust store, but needed to validate path to root
+
+## Certificate Chain in Practice
+
+### Proper Chain File
+
+When CAPF issues a device certificate, it should provide:
+
+```
+-----BEGIN CERTIFICATE-----
+[Device Certificate]
+-----END CERTIFICATE-----
+-----BEGIN CERTIFICATE-----
+[Intermediate CA Certificate]
+-----END CERTIFICATE-----
+```
+
+The root CA is **not** included (client already has it trusted).
+
+### Chain Verification
+
+```bash
+# Verify complete chain
+openssl verify -CAfile root-ca.pem -untrusted intermediate-ca.pem device-cert.pem
+
+# Should output:
+# device-cert.pem: OK
+```
+
+**Verification steps:**
+1. Device cert signature valid (signed by intermediate)? ✓
+2. Intermediate cert signature valid (signed by root)? ✓
+3. Root cert in trusted store? ✓
+4. All certificates within validity period? ✓
+5. No certificates revoked? ✓
+
+## Security Considerations
+
+### Root CA Protection
+
+**Root CA private key is the crown jewel:**
+- Compromise = entire PKI is untrusted
+- Must be protected with maximum security
+- Consider: HSM, air-gapped system, physical vault
+
+**Best practices:**
+1. Generate on offline system
+2. Store encrypted on removable media
+3. Physical access controls
+4. Dual-control (require two people)
+5. Document every use in audit log
+
+### Intermediate CA Operations
+
+**Intermediate can be online but still protected:**
+- Used frequently for device enrollment
+- Can be stored in CAPF database
+- Should have file-level encryption
+- Backup securely
+- Monitor usage logs
+
+**Compromise response:**
+1. Generate new intermediate from root
+2. Revoke old intermediate (CRL)
+3. Re-issue device certificates
+4. No need to re-trust root everywhere!
+
+## Validity Periods
+
+Recommended validity periods by level:
+
+| Certificate Type | Validity | Reasoning |
+|-----------------|----------|-----------|
+| Root CA | 20 years | Rarely used, maximum stability |
+| Intermediate CA | 5-10 years | Balance between security and operations |
+| Device LSC | 1-2 years | Regular rotation, compromise containment |
+
+**Stagger expirations:**
+- Root expires: 2045-01-01
+- Intermediate expires: 2030-01-01
+- Devices expire: Various (rolling)
+
+This ensures intermediate can be rotated before root expiration.
+
+## Chain Depth Limits
+
+**Recommended maximum: 3 levels**
+- Root CA → Intermediate CA → Device Certificate
+
+**Avoid:**
+- Too shallow (1 level): No protection for root key
+- Too deep (4+ levels): Unnecessary complexity, validation overhead
+
+## Common Pitfalls
+
+### Missing Intermediate in Chain
+
+**Problem:** Device certificate doesn't include intermediate
+
+**Symptom:**
+```
+unable to get local issuer certificate
+```
+
+**Solution:** CAPF must send device cert + intermediate cert together
+
+### Wrong Trust Store
+
+**Problem:** Intermediate CA added to trust store instead of root
+
+**Issue:** Works temporarily but breaks validation logic
+
+**Correct approach:** Only root CA in trust store, intermediate in chain
+
+### Expired Intermediate
+
+**Problem:** Intermediate CA expired but root still valid
+
+**Impact:** Cannot issue new device certificates
+
+**Prevention:** Monitor intermediate expiration, rotate before expiry
+
+### Self-Signed Intermediate
+
+**Problem:** Intermediate CA is self-signed, not signed by root
+
+**Impact:** Chain validation fails, no path to trusted root
+
+**Solution:** Ensure intermediate CSR is signed by root CA
+
+## PKI Lifecycle
+
+### Initial Setup
+1. Generate root CA (offline, secure)
+2. Generate intermediate CA CSR
+3. Sign intermediate with root
+4. Deploy intermediate to CAPF service
+5. Distribute root CA to trust stores
+
+### Operations Phase
+1. CAPF uses intermediate to sign device certificates
+2. Devices present cert + intermediate during TLS
+3. Systems validate chain to trusted root
+4. Regular monitoring of expiration dates
+
+### Rotation Phase
+1. Generate new intermediate CA
+2. Sign with (still valid) root CA
+3. Deploy new intermediate to CAPF
+4. Continue issuing with new intermediate
+5. Old device certificates still valid (chain to same root)
+6. Re-issue devices before old intermediate expires
+
+### Emergency Response (Compromise)
+1. Generate new intermediate immediately
+2. Revoke compromised intermediate (publish CRL)
+3. Force re-enrollment of all devices
+4. Root CA remains trusted (no system-wide changes needed)
+
+## Comparison: Hierarchy vs. Flat
+
+| Aspect | Flat (Single-Level) | Hierarchical (Multi-Level) |
+|--------|---------------------|----------------------------|
+| Root key exposure | High (used daily) | Low (used rarely) |
+| Compromise impact | Complete PKI rebuild | Rotate intermediate only |
+| Key rotation | Re-trust everywhere | Transparent to clients |
+| Security | Lower | Higher |
+| Complexity | Lower | Higher |
+| Production use | Development only | Recommended |
+
+## Industry Standards
+
+**X.509 PKI Best Practices:**
+- CA/Browser Forum Baseline Requirements
+- NIST SP 800-57 (Key Management)
+- RFC 5280 (X.509 Certificate Profile)
+
+**Common implementations:**
+- Commercial PKI: 3-4 levels (root → policy CA → issuing CA → end entity)
+- Enterprise PKI: 2-3 levels (root → issuing CA → end entity)
+- UseCallManager: 2-3 levels (root → CAPF issuer → device LSC)
+
+## Next Steps
+
+To implement a proper certificate hierarchy:
+
+1. **Understand the architecture** (this page) ✓
+2. **Set up multi-level CA** - See: [Set Up Certificate Hierarchy](/how-to/certificates/setup-hierarchy/)
+3. **Deploy and trust root** - See: [Trust CAPF Issuer Certificate](/how-to/certificates/trust-issuer/)
+4. **Issue device certificates** - See: [Enroll Phone with LSC](/how-to/phone/enroll-lsc/)
+5. **Monitor and rotate** - See: [Renew Expiring Certificates](/how-to/certificates/renew-certificates/)

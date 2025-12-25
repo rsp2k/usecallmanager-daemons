@@ -47,6 +47,7 @@ export default defineConfig({
               items: [
                 { label: 'Upload Certificates to TVS', slug: 'how-to/certificates/upload-to-tvs' },
                 { label: 'Generate CAPF Issuer Certificate', slug: 'how-to/certificates/generate-issuer' },
+                { label: 'Set Up Certificate Hierarchy', slug: 'how-to/certificates/setup-hierarchy' },
                 { label: 'Trust CAPF Issuer Certificate', slug: 'how-to/certificates/trust-issuer' },
                 { label: 'Renew Expiring Certificates', slug: 'how-to/certificates/renew-certificates' },
               ],
@@ -83,6 +84,7 @@ export default defineConfig({
             { label: 'System Architecture', slug: 'architecture/overview' },
             { label: 'Understanding TVS', slug: 'explanation/understanding-tvs' },
             { label: 'Understanding CAPF', slug: 'explanation/understanding-capf' },
+            { label: 'Certificate Hierarchy & Trust Chains', slug: 'explanation/certificate-hierarchy' },
             { label: 'Trust Model & ITL Files', slug: 'architecture/configuration-signing' },
             { label: 'API Architecture', slug: 'api/overview' },
           ],
