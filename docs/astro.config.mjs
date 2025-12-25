@@ -47,6 +47,7 @@ export default defineConfig({
               items: [
                 { label: 'Upload Certificates to TVS', slug: 'how-to/certificates/upload-to-tvs' },
                 { label: 'Generate CAPF Issuer Certificate', slug: 'how-to/certificates/generate-issuer' },
+                { label: 'Trust CAPF Issuer Certificate', slug: 'how-to/certificates/trust-issuer' },
                 { label: 'Renew Expiring Certificates', slug: 'how-to/certificates/renew-certificates' },
               ],
             },

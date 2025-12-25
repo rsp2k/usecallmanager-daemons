@@ -1,0 +1,590 @@
+---
+title: Trust CAPF Issuer Certificate
+description: Import and trust the CAPF issuer certificate on Windows, Linux, Chrome, and Firefox
+---
+
+import { Aside, Steps, Badge, Tabs, TabItem } from '@astrojs/starlight/components';
+
+## What Is the CAPF Issuer Certificate?
+
+The CAPF issuer certificate is the root Certificate Authority (CA) that signs all device certificates (LSCs). To establish secure connections with phones, your computer needs to trust this CA.
+
+<Aside type="tip">
+Think of the issuer certificate as the "master key" that validates all phone certificates. Once your system trusts it, all phones with LSCs issued by your CAPF will be automatically trusted.
+</Aside>
+
+## When You Need This
+
+You need to trust the CAPF issuer certificate when:
+
+- Accessing the web interface over HTTPS with self-signed certificates
+- Using browser-based tools to manage phone security
+- Developing applications that connect to phones
+- Verifying phone certificates manually
+- Eliminating "untrusted certificate" warnings
+
+## Export the Issuer Certificate
+
+First, get the certificate from your CAPF service:
+
+### Via Web Interface
+
+<Steps>
+
+1. Navigate to **Admin** → **Issuer Certificate**
+
+2. Click **Download Certificate** button
+
+3. Save file as `capf-issuer.pem` or `capf-issuer.crt`
+
+</Steps>
+
+### Via API
+
+```bash
+# Download issuer certificate
+curl -o capf-issuer.pem http://localhost:8082/api/v1/issuer-certificate/download
+
+# Verify it's a valid certificate
+openssl x509 -in capf-issuer.pem -text -noout | head -20
+```
+
+You should see certificate details like:
+```
+Certificate:
+    Data:
+        Version: 3 (0x2)
+        Serial Number: ...
+        Issuer: CN=CAPF-SAST, O=UseCallManager, C=NZ
+        Subject: CN=CAPF-SAST, O=UseCallManager, C=NZ
+```
+
+## Windows
+
+### Import to Windows Certificate Store
+
+<Steps>
+
+1. **Open Certificate Manager**
+
+   Press `Win + R`, type `certmgr.msc`, press Enter
+
+2. **Navigate to Trusted Root CAs**
+
+   - Expand **Trusted Root Certification Authorities**
+   - Right-click **Certificates**
+   - Select **All Tasks** → **Import...**
+
+3. **Start Certificate Import Wizard**
+
+   - Click **Next**
+   - Click **Browse**, select your `capf-issuer.pem` file
+   - Change file filter to "All Files (*.*)" if needed
+   - Click **Next**
+
+4. **Choose Certificate Store**
+
+   - Select **Place all certificates in the following store**
+   - Ensure it shows: **Trusted Root Certification Authorities**
+   - Click **Next**
+
+5. **Complete Import**
+
+   - Click **Finish**
+   - Security warning appears: "You are about to install a certificate from a CA claiming to represent..."
+   - Verify the certificate details match your CAPF issuer
+   - Click **Yes**
+
+6. **Verify Installation**
+
+   Find the certificate:
+   - In Certificate Manager, navigate to **Trusted Root Certification Authorities** → **Certificates**
+   - Look for your issuer (e.g., "CAPF-SAST")
+   - Double-click to view details
+
+</Steps>
+
+<Aside type="note">
+**Chrome and Edge** on Windows use the Windows certificate store automatically. Once imported, they'll trust connections to your CAPF service.
+</Aside>
+
+### Command Line Import (PowerShell)
+
+For automation or scripting:
+
+```powershell
+# Import certificate to Trusted Root CA store
+Import-Certificate -FilePath "C:\path\to\capf-issuer.pem" -CertStoreLocation Cert:\LocalMachine\Root
+
+# Verify import
+Get-ChildItem Cert:\LocalMachine\Root | Where-Object {$_.Subject -like "*CAPF*"}
+```
+
+<Aside type="caution">
+**Requires Administrator privileges** - Run PowerShell as Administrator
+</Aside>
+
+## Linux
+
+Linux certificate trust varies by distribution. Here are the most common methods:
+
+<Tabs>
+<TabItem label="Ubuntu/Debian">
+
+### Ubuntu/Debian (update-ca-certificates)
+
+<Steps>
+
+1. **Copy certificate to system directory**
+
+   ```bash
+   sudo cp capf-issuer.pem /usr/local/share/ca-certificates/capf-issuer.crt
+   ```
+
+   <Aside type="note">
+   **File extension matters!** Must be `.crt` for `update-ca-certificates` to recognize it.
+   </Aside>
+
+2. **Update CA trust store**
+
+   ```bash
+   sudo update-ca-certificates
+   ```
+
+   Expected output:
+   ```
+   Updating certificates in /etc/ssl/certs...
+   1 added, 0 removed; done.
+   Running hooks in /etc/ca-certificates/update.d...
+   done.
+   ```
+
+3. **Verify installation**
+
+   ```bash
+   # Check if certificate is in bundle
+   grep -r "CAPF-SAST" /etc/ssl/certs/
+
+   # Test with OpenSSL
+   openssl s_client -connect localhost:8082 -CAfile /etc/ssl/certs/ca-certificates.crt
+   ```
+
+</Steps>
+
+</TabItem>
+
+<TabItem label="RHEL/CentOS/Fedora">
+
+### RHEL/CentOS/Fedora (update-ca-trust)
+
+<Steps>
+
+1. **Copy certificate to anchors directory**
+
+   ```bash
+   sudo cp capf-issuer.pem /etc/pki/ca-trust/source/anchors/capf-issuer.crt
+   ```
+
+2. **Update CA trust**
+
+   ```bash
+   sudo update-ca-trust extract
+   ```
+
+3. **Verify installation**
+
+   ```bash
+   # Check bundle
+   grep -r "CAPF-SAST" /etc/pki/ca-trust/extracted/
+
+   # Test connection
+   openssl s_client -connect localhost:8082 -CAfile /etc/pki/tls/certs/ca-bundle.crt
+   ```
+
+</Steps>
+
+</TabItem>
+
+<TabItem label="Arch Linux">
+
+### Arch Linux
+
+<Steps>
+
+1. **Copy certificate**
+
+   ```bash
+   sudo cp capf-issuer.pem /etc/ca-certificates/trust-source/anchors/capf-issuer.crt
+   ```
+
+2. **Update trust store**
+
+   ```bash
+   sudo trust extract-compat
+   ```
+
+3. **Verify**
+
+   ```bash
+   trust list | grep -A 5 "CAPF"
+   ```
+
+</Steps>
+
+</TabItem>
+</Tabs>
+
+<Aside type="tip">
+**Chrome on Linux** uses the system certificate store. After updating system certificates, restart Chrome to pick up changes.
+</Aside>
+
+### Per-User Trust (No Root Required)
+
+If you don't have sudo access:
+
+```bash
+# Create user certificate directory
+mkdir -p ~/.pki/nssdb
+
+# Import certificate (Firefox/Thunderbird format)
+certutil -A -n "CAPF Issuer" -t "C,," -i capf-issuer.pem -d sql:$HOME/.pki/nssdb
+
+# Verify
+certutil -L -d sql:$HOME/.pki/nssdb | grep CAPF
+```
+
+## Chrome
+
+### Chrome on Windows/Linux
+
+Chrome uses the **system certificate store**:
+- **Windows**: Follow Windows instructions above
+- **Linux**: Follow Linux distribution instructions above
+
+No additional Chrome configuration needed!
+
+### Chrome with Custom Certificate Store
+
+If Chrome doesn't pick up system certificates:
+
+<Steps>
+
+1. **Open Chrome Settings**
+
+   Navigate to: `chrome://settings/security`
+
+2. **Manage Certificates**
+
+   - Scroll to **Advanced** → **Manage certificates**
+   - Click **Manage certificates**
+
+3. **Import Certificate** (Windows)
+
+   - Go to **Trusted Root Certification Authorities** tab
+   - Click **Import...**
+   - Select `capf-issuer.pem`
+   - Click **Next** → **Finish**
+
+4. **Import Certificate** (Linux/macOS)
+
+   - Go to **Authorities** tab
+   - Click **Import...**
+   - Select `capf-issuer.pem`
+   - Check **Trust this certificate for identifying websites**
+   - Click **OK**
+
+5. **Restart Chrome**
+
+   Close all Chrome windows and reopen
+
+</Steps>
+
+### Verify in Chrome
+
+```bash
+# Test HTTPS connection
+curl --cacert capf-issuer.pem https://localhost:8082/api/v1/health
+
+# Or visit in Chrome
+# Should show green padlock, no warnings
+```
+
+## Firefox
+
+Firefox maintains its own certificate store, separate from the system.
+
+### Import Certificate to Firefox
+
+<Steps>
+
+1. **Open Firefox Settings**
+
+   - Click menu (☰) → **Settings**
+   - Or navigate to: `about:preferences`
+
+2. **Go to Privacy & Security**
+
+   - Scroll to **Certificates** section
+   - Click **View Certificates...**
+
+3. **Import Certificate**
+
+   - Go to **Authorities** tab
+   - Click **Import...**
+   - Select your `capf-issuer.pem` file
+   - Click **Open**
+
+4. **Set Trust Settings**
+
+   Dialog appears: "Downloading Certificate"
+
+   Check the boxes:
+   - ✅ **Trust this CA to identify websites.**
+   - ✅ **Trust this CA to identify email users.** (optional)
+   - ✅ **Trust this CA to identify software makers.** (optional)
+
+5. **Confirm Import**
+
+   - Click **OK**
+   - Certificate now appears in Authorities list
+
+6. **Verify**
+
+   - Find your issuer in the list (e.g., "CAPF-SAST")
+   - Should show under organization (e.g., "UseCallManager")
+
+</Steps>
+
+<Aside type="tip">
+**Search for your certificate**: In the Authorities tab, type your issuer name in the search box to quickly find it.
+</Aside>
+
+### Command Line Import (Firefox Profile)
+
+For automation or managing multiple profiles:
+
+```bash
+# Find Firefox profile directory
+firefox_profile=$(find ~/.mozilla/firefox -name "*.default-release" | head -1)
+
+# Import certificate
+certutil -A -n "CAPF Issuer" -t "C,," -i capf-issuer.pem -d sql:$firefox_profile
+
+# Verify
+certutil -L -d sql:$firefox_profile | grep "CAPF"
+```
+
+Expected output:
+```
+CAPF Issuer                                          C,,
+```
+
+<Aside type="note">
+Trust flags explanation:
+- **C** = Trusted CA for SSL/TLS
+- **,,** = Not trusted for email or code signing
+</Aside>
+
+## Verification
+
+After importing the certificate, verify trust on each platform:
+
+### Test HTTPS Connection
+
+```bash
+# Using curl (respects system trust store)
+curl -v https://localhost:8082/api/v1/health
+
+# Should show:
+# * SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384
+# * Server certificate:
+# *  subject: CN=localhost
+# *  issuer: CN=CAPF-SAST, O=UseCallManager, C=NZ
+# *  SSL certificate verify ok.
+```
+
+### Test in Browser
+
+Visit your CAPF web interface:
+```
+https://localhost:8082
+```
+
+**Success indicators:**
+- 🔒 Green padlock in address bar
+- No certificate warnings
+- Certificate details show your CAPF issuer
+
+**If you see warnings:**
+- "Your connection is not private"
+- "NET::ERR_CERT_AUTHORITY_INVALID"
+- Certificate not trusted
+
+→ Certificate not properly imported. Review steps above.
+
+### Check Certificate Chain
+
+```bash
+# View full certificate chain
+openssl s_client -connect localhost:8082 -showcerts | less
+
+# Look for:
+# Verify return code: 0 (ok)
+```
+
+## Troubleshooting
+
+### Windows: Certificate Still Not Trusted
+
+**Problem**: Imported to wrong store or user store instead of machine store
+
+**Solution**:
+```powershell
+# Import to Local Machine store (requires admin)
+Import-Certificate -FilePath capf-issuer.pem -CertStoreLocation Cert:\LocalMachine\Root
+
+# Verify it's in the right place
+Get-ChildItem Cert:\LocalMachine\Root | Where-Object {$_.Subject -like "*CAPF*"}
+```
+
+### Linux: System Doesn't Pick Up Certificate
+
+**Problem**: Certificate in wrong directory or wrong format
+
+**Solution**:
+
+<Steps>
+
+1. **Check file extension**
+   ```bash
+   # Must be .crt for update-ca-certificates
+   ls -l /usr/local/share/ca-certificates/
+   ```
+
+2. **Check file format**
+   ```bash
+   # Should show certificate details
+   openssl x509 -in /usr/local/share/ca-certificates/capf-issuer.crt -text -noout
+   ```
+
+3. **Force update**
+   ```bash
+   sudo update-ca-certificates --fresh --verbose
+   ```
+
+</Steps>
+
+### Chrome: Still Shows "Not Secure"
+
+**Problem**: Chrome cache or profile issue
+
+**Solution**:
+
+<Steps>
+
+1. **Clear SSL cache**
+   - Go to `chrome://net-internals/#sockets`
+   - Click **Flush socket pools**
+   - Go to `chrome://net-internals/#ssl`
+   - Click **Clear SSL cache**
+
+2. **Restart Chrome completely**
+   ```bash
+   # Linux/macOS - ensure all processes closed
+   killall chrome
+
+   # Windows PowerShell
+   Stop-Process -Name chrome
+   ```
+
+3. **Verify system trust store updated**
+   - Windows: Check `certmgr.msc`
+   - Linux: Run `update-ca-certificates` again
+
+</Steps>
+
+### Firefox: Certificate Not Listed
+
+**Problem**: Import failed or wrong trust flags
+
+**Solution**:
+
+```bash
+# List all certificates in Firefox profile
+certutil -L -d sql:~/.mozilla/firefox/*.default-release
+
+# If not found, re-import with explicit trust
+certutil -A -n "CAPF Issuer" -t "C,," -i capf-issuer.pem \
+  -d sql:~/.mozilla/firefox/*.default-release
+
+# Verify trust flags
+certutil -L -d sql:~/.mozilla/firefox/*.default-release -n "CAPF Issuer"
+```
+
+### "Certificate Has Expired"
+
+**Problem**: Issuer certificate validity period ended
+
+**Solution**:
+
+<Steps>
+
+1. **Check expiration date**
+   ```bash
+   openssl x509 -in capf-issuer.pem -noout -dates
+   ```
+
+2. **Generate new issuer certificate**
+
+   See: [Generate CAPF Issuer Certificate](/how-to/certificates/generate-issuer/)
+
+3. **Re-import new certificate**
+
+   Follow platform-specific steps above with new certificate
+
+4. **Re-enroll all phones**
+
+   Old LSCs signed by expired issuer are invalid
+
+</Steps>
+
+## Security Considerations
+
+### Trust Store Scope
+
+**System-wide vs. User-only:**
+
+| Scope | Location | Who Can Access | Recommended For |
+|-------|----------|---------------|-----------------|
+| System-wide | `/etc/ssl/certs` (Linux)<br/>`LocalMachine\Root` (Windows) | All users | Production servers |
+| User-only | `~/.pki/nssdb` (Linux)<br/>`CurrentUser\Root` (Windows) | Single user | Development workstations |
+
+### Trust Implications
+
+<Aside type="caution">
+**Understand what you're trusting**: Importing a CA certificate allows it to sign certificates for **any** domain. Only trust CAs you control.
+</Aside>
+
+**By trusting the CAPF issuer, you're saying:**
+- ✅ "I trust certificates signed by this CA"
+- ✅ "This CA is authorized to issue certificates in my organization"
+- ❌ "This CA can issue certificates for google.com" (no - scope limited to your infrastructure)
+
+### Best Practices
+
+1. **Limit issuer certificate validity**: 5-10 years maximum
+2. **Protect private key**: Store securely, never expose
+3. **Document trust decisions**: Who, what, when, why
+4. **Regular audits**: Review trusted CAs periodically
+5. **Revocation plan**: Know how to remove trust if compromised
+
+## Next Steps
+
+After trusting the CAPF issuer certificate:
+
+1. **Test secure connections** - Verify HTTPS access without warnings
+2. **Enroll phones** - Generate LSCs for devices (see [Enroll Phone with LSC](/how-to/phone/enroll-lsc/))
+3. **Monitor expiration** - Set calendar reminders before issuer expires
+4. **Document for team** - Share these instructions with colleagues
+
+For certificate lifecycle management, see [Renew Expiring Certificates](/how-to/certificates/renew-certificates/).
