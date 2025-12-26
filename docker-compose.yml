@@ -25,6 +25,12 @@ services:
       caddy: tvs.${DOMAIN:-localhost}
       caddy.reverse_proxy: "{{upstreams 8081}}"
     restart: unless-stopped
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+        compress: "true"
     develop:
       watch:
         - action: sync+restart
@@ -41,6 +47,8 @@ services:
     volumes:
       - capf-data:/var/lib/capf
       - ./certs/capf:/certs:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - .:/project:ro
     environment:
       - CAPF_DATABASE_URL=sqlite:////var/lib/capf/capf.sqlite3
       - CAPF_TLS_CERT_FILE=/certs/capf.pem
@@ -60,6 +68,12 @@ services:
       caddy: capf.${DOMAIN:-localhost}
       caddy.reverse_proxy: "{{upstreams 8082}}"
     restart: unless-stopped
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+        compress: "true"
     develop:
       watch:
         - action: sync+restart
@@ -71,6 +85,8 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       target: ${MODE:-prod}
+    ports:
+      - "4321:4321"
     environment:
       - TVS_API_URL=http://tvs:8081
       - CAPF_API_URL=http://capf:8082
